@@ -287,26 +287,28 @@ async function listIssues({ device_id, severity, issue_type, start_date, end_dat
 }
 
 async function getIssueSummary({ device_id, site_id } = {}) {
-  let sql = `
+  const params = [];
+  let onClause = 'il.severity = ise.id AND il.end_date IS NULL';
+
+  if (device_id != null) {
+    onClause += ' AND il.device_id = ?';
+    params.push(device_id);
+  }
+  if (site_id != null) {
+    onClause += ' AND EXISTS (SELECT 1 FROM device_info d WHERE d.id = il.device_id AND d.site_id = ?)';
+    params.push(site_id);
+  }
+
+  const sql = `
     SELECT
       ise.id AS severity_id,
       ise.severity AS severity_name,
       COUNT(il.id) AS count
     FROM issue_severity ise
-    LEFT JOIN issue_log_01 il
-      ON il.severity = ise.id AND il.end_date IS NULL
+    LEFT JOIN issue_log_01 il ON ${onClause}
+    GROUP BY ise.id, ise.severity
+    ORDER BY ise.id
   `;
-  const params = [];
-
-  if (device_id != null || site_id != null) {
-    sql += ' LEFT JOIN device_info d ON d.id = il.device_id WHERE 1=1';
-    if (device_id != null) { sql += ' AND il.device_id = ?'; params.push(device_id); }
-    if (site_id != null)   { sql += ' AND d.site_id = ?';    params.push(site_id); }
-  } else {
-    sql += ' WHERE 1=1';
-  }
-
-  sql += ' GROUP BY ise.id, ise.severity ORDER BY ise.id';
 
   const rows = await query(sql, params);
   const total = rows.reduce((sum, r) => sum + Number(r.count), 0);
@@ -428,6 +430,7 @@ async function getTopologyLinks({ map_id, site_id } = {}) {
     WHERE 1=1
   `;
   const params = [];
+  if (map_id != null)  { sql += ' AND l.source IN (SELECT device_id FROM topology_nodes WHERE map_id = ?) AND l.target IN (SELECT device_id FROM topology_nodes WHERE map_id = ?)'; params.push(map_id, map_id); }
   if (site_id != null) { sql += ' AND l.site_id = ?'; params.push(site_id); }
   sql += ' ORDER BY l.id';
   return query(sql, params);
