@@ -89,6 +89,8 @@ server.tool(
   'One-call per-device circuit/interface status summary. Use for Korean requests like "장비별 회선현황", "전체 장비 포트 현황", or "site/group device interface summary"; avoids list_devices + repeated get_device_interfaces calls.',
   {
     site_id:        z.number().optional().describe('Site ID filter'),
+    site_name:      z.string().optional().describe('사이트명 부분 검색. site_id 대신 사용 가능'),
+    name:           z.string().optional().describe('장비명 부분 검색 (예: Core-SW)'),
     status:         z.number().optional().describe('Device status filter (1=UP, 0=DOWN)'),
     vendor:         z.string().optional().describe('Vendor partial match'),
     device_type_id: z.number().optional().describe('Device type ID filter'),
@@ -123,6 +125,7 @@ server.tool(
     interface_id: z.number().optional().describe('인터페이스 ID로 필터'),
     mac:          z.string().optional().describe('MAC 주소로 검색 (부분 검색)'),
     ip:           z.string().optional().describe('IP 주소로 검색 (부분 검색)'),
+    limit:        z.number().optional().default(200).describe('최대 반환 건수 (기본 200)'),
   },
   async (args) => {
     try { return ok(await get.getDeviceCamTable(args)); } catch (e) { return err(e); }
@@ -208,7 +211,7 @@ server.tool(
   }
 );
 
-// 11. 사이트 목록
+// 12. 사이트 목록
 server.tool(
   'list_sites',
   'NMS에 등록된 사이트 목록을 조회합니다.',
@@ -218,19 +221,20 @@ server.tool(
   }
 );
 
-// 12. 장비 그룹 목록
+// 13. 장비 그룹 목록
 server.tool(
   'list_device_groups',
   '장비 그룹 목록을 조회합니다.',
   {
     site_id: z.number().optional().describe('사이트 ID로 필터'),
+    name:    z.string().optional().describe('그룹명 부분 검색 (예: 코어)'),
   },
   async (args) => {
     try { return ok(await get.listDeviceGroups(args)); } catch (e) { return err(e); }
   }
 );
 
-// 13. 장비 그룹 멤버 조회
+// 14. 장비 그룹 멤버 조회
 server.tool(
   'get_device_group_members',
   '특정 장비 그룹에 속한 장비 목록을 조회합니다.',

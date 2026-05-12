@@ -10,7 +10,7 @@ async function listDevices({ site_id, status, vendor, device_type_id, group_id, 
       d.id, d.site_id, s.name AS site_name,
       d.name, d.ip, d.vendor, d.model,
       dt.name AS device_type,
-      d.status, d.disabled, d.deleted,
+      d.status, d.disabled,
       d.sys_location, d.sys_uptime,
       d.ping_enabled, d.snmp_enabled, d.config_enabled,
       d.description, d.create_date, d.modify_date
@@ -99,6 +99,8 @@ async function getDeviceInterfaces({ device_id, admin_status, oper_status } = {}
 
 async function listDeviceInterfaceSummary({
   site_id,
+  site_name,
+  name,
   status,
   vendor,
   device_type_id,
@@ -137,6 +139,8 @@ async function listDeviceInterfaceSummary({
   const params = [];
 
   if (site_id != null)        { sql += ' AND d.site_id = ?';       params.push(site_id); }
+  if (site_name)              { sql += ' AND s.name LIKE ?';       params.push(`%${site_name}%`); }
+  if (name)                   { sql += ' AND d.name LIKE ?';       params.push(`%${name}%`); }
   if (status != null)         { sql += ' AND d.status = ?';        params.push(status); }
   if (vendor)                 { sql += ' AND d.vendor LIKE ?';     params.push(`%${vendor}%`); }
   if (device_type_id != null) { sql += ' AND d.device_type_id = ?'; params.push(device_type_id); }
@@ -177,7 +181,7 @@ async function getDeviceIpAddresses({ device_id } = {}) {
   `, [device_id]);
 }
 
-async function getDeviceCamTable({ device_id, interface_id, mac, ip } = {}) {
+async function getDeviceCamTable({ device_id, interface_id, mac, ip, limit = 200 } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
   let sql = `
@@ -197,7 +201,8 @@ async function getDeviceCamTable({ device_id, interface_id, mac, ip } = {}) {
   if (mac)                  { sql += ' AND cam.mac LIKE ?';       params.push(`%${mac}%`); }
   if (ip)                   { sql += ' AND cam.ip LIKE ?';        params.push(`%${ip}%`); }
 
-  sql += ' ORDER BY cam.interface_id, cam.ip';
+  sql += ' ORDER BY cam.interface_id, cam.ip LIMIT ?';
+  params.push(Number(limit));
   return query(sql, params);
 }
 
@@ -335,7 +340,7 @@ async function listSites() {
   `);
 }
 
-async function listDeviceGroups({ site_id } = {}) {
+async function listDeviceGroups({ site_id, name } = {}) {
   let sql = `
     SELECT g.id, g.site_id, s.name AS site_name,
            g.name, g.description, g.disabled,
@@ -347,6 +352,7 @@ async function listDeviceGroups({ site_id } = {}) {
   `;
   const params = [];
   if (site_id != null) { sql += ' AND g.site_id = ?'; params.push(site_id); }
+  if (name)            { sql += ' AND g.name LIKE ?';  params.push(`%${name}%`); }
   sql += ' GROUP BY g.id ORDER BY g.site_id, g.name';
   return query(sql, params);
 }
