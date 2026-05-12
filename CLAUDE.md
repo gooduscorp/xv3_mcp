@@ -50,6 +50,14 @@ MySQL2 connection pool reading config from `.env` via `dotenv`. Exports `query(s
 
 Query functions cover: devices, interfaces, IP/MAC tables, alarms, issues (including `getIssueSummary` for severity-grouped active issue counts), sites, groups, users, topology maps/nodes/links, collectors, device configs, SNMP templates, and system settings.
 
+**Filter consistency**: `list_devices`, `list_device_interface_summary` share the same filter set (`name`, `site_name`, `site_id`, `status`, `vendor`, `device_type_id`, `group_id`, `disabled`). `list_device_groups` supports `site_id` and `name` partial search.
+
+**Limits**: `get_device_cam_table` defaults to 200 (CAM tables can be large). Most other list tools default to 100.
+
+**`getIssueSummary` SQL pattern**: filters (`device_id`, `site_id`) are applied in the `ON` clause of the LEFT JOIN, not the WHERE clause — this ensures severity rows with 0 active issues still appear in results.
+
+**`getTopologyLinks` map_id**: filters via subquery on `topology_nodes` since `topology_links` has no `map_id` column directly.
+
 ### `tools/set.js` — Write operations (11 tools)
 
 Mutation functions cover: device description/monitoring/disabled/sysLocation, device group CRUD, topology link create/delete, and closing issues.
