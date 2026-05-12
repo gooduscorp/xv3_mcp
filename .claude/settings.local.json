@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(node analyze_db.js)",
+      "Bash(node analyze_key_tables.js)",
+      "Bash(node -e \"require\\('zod'\\)\")",
+      "Bash(node -e \"require\\('./index.js'\\)\")",
+      "Bash(kill %1)"
+    ]
+  }
+}
