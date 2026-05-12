@@ -1,0 +1,24 @@
+{
+  "name": "xv3_mcp",
+  "version": "1.0.0",
+  "description": "XV3 NMS MariaDB MCP Server",
+  "main": "index.js",
+  "bin": {
+    "xv3-nms-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "start:http": "node index.js --http 3334",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.20.0"
+  }
+}

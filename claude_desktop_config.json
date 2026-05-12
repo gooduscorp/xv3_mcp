@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "xv3-nms": {
+      "command": "node",
+      "args": ["D:\\Workspace\\Project\\13_MCP\\xv3_mcp\\index.js"]
+    }
+  }
+}
