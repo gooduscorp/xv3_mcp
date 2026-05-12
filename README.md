@@ -1,7 +1,7 @@
 # XV3 NMS MCP Server
 
 XV3 NMS(Network Management System)의 MariaDB 데이터를 AI 클라이언트(Claude Desktop 등)에 노출하는 **MCP(Model Context Protocol) 서버**입니다.
-네트워크 장비 조회, 이슈 확인, 성능 데이터 분석, 설정 변경 등 41개 도구를 자연어로 사용할 수 있습니다.
+네트워크 장비 조회, 이슈 확인, 성능 데이터 분석, 이벤트 로그 조회, 설정 변경 등 44개 도구를 자연어로 사용할 수 있습니다.
 
 ---
 
@@ -12,6 +12,7 @@ XV3 NMS(Network Management System)의 MariaDB 데이터를 AI 클라이언트(Cl
 | 조회(GET) | 26 | 장비 목록/상세, 인터페이스, IP/MAC, 알람, 이슈, 토폴로지, 설정 백업 등 |
 | 변경(SET) | 11 | 장비 설명·모니터링·비활성화, 그룹 CRUD, 토폴로지 링크, 이슈 종료 |
 | 성능(PERF) | 4 | 수집 항목 목록, 장비/인터페이스 성능 시계열, Top-N 성능 순위 |
+| 이벤트(EVENT) | 3 | Syslog·Threshold·Ping 이벤트 조회/집계, 지속 이슈 조회 |
 
 전체 도구 파라미터 및 응답 형식은 [TOOLS.md](./TOOLS.md)를 참조하세요.
 

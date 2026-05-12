@@ -6,9 +6,10 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const express = require('express');
 const { z } = require('zod');
-const get  = require('./tools/get');
-const set  = require('./tools/set');
-const perf = require('./tools/perf');
+const get   = require('./tools/get');
+const set   = require('./tools/set');
+const perf  = require('./tools/perf');
+const issue = require('./tools/issue');
 
 // ────────────────────────────────────────────────────────
 // 헬퍼: 결과를 MCP 텍스트 응답으로 변환
@@ -193,6 +194,7 @@ function createMcpServer() {
       try { return ok(await get.getIssueSummary(args)); } catch (e) { return err(e); }
     }
   );
+
 
   // 11. 이슈 유형 목록
   srv.tool(
@@ -599,6 +601,61 @@ function createMcpServer() {
     },
     async (args) => {
       try { return ok(await perf.getPerfTopN(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // ──────────────────────────────────────────────────────
+  // 이벤트 로그 (xv3_issue DB)
+  // ──────────────────────────────────────────────────────
+
+  // 42. 이벤트 로그 조회
+  srv.tool(
+    'list_events',
+    'xv3_issue DB의 이벤트 로그를 조회합니다. Syslog(S), Threshold(C), Ping(P) 등 모든 이벤트 유형을 포함합니다. syslog_keyword는 Facility-Severity 형식입니다 (예: 5-4 = Notification/Warning).',
+    {
+      device_id:       z.number().optional().describe('장비 ID로 필터'),
+      site_id:         z.number().optional().describe('사이트 ID로 필터'),
+      issue_type:      z.enum(['S','C','P','A','F','I','M','N','E','O','R','W']).optional().describe('이벤트 유형 코드 (S=Syslog, C=Threshold, P=Ping, A=TempFault, F=FAN, I=PortStatus, M=SystemEvent 등)'),
+      severity:        z.number().optional().describe('심각도 (1=Critical, 2=Major, 3=Minor, 4=Warning, 5=Normal)'),
+      syslog_keyword:  z.string().optional().describe('Syslog Facility-Severity 코드 부분 검색 (예: "5-4" = Notification/Warning, "5-3" = Notification/Error)'),
+      start_date:      z.string().optional().describe('조회 시작 일시 (예: 2026-05-01 00:00:00)'),
+      end_date:        z.string().optional().describe('조회 종료 일시 (예: 2026-05-12 23:59:59)'),
+      active_only:     z.boolean().optional().describe('미종료 이벤트만 조회 (end_date IS NULL)'),
+      limit:           z.number().optional().default(100).describe('최대 반환 건수 (기본 100)'),
+    },
+    async (args) => {
+      try { return ok(await issue.listEvents(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // 43. 이벤트 집계 요약
+  srv.tool(
+    'get_event_summary',
+    'xv3_issue DB 이벤트를 이벤트 유형별·심각도별로 집계합니다. 전체 이벤트 현황 파악에 사용하세요.',
+    {
+      device_id:  z.number().optional().describe('특정 장비로 범위 제한'),
+      site_id:    z.number().optional().describe('특정 사이트로 범위 제한'),
+      start_date: z.string().optional().describe('집계 시작 일시'),
+      end_date:   z.string().optional().describe('집계 종료 일시'),
+    },
+    async (args) => {
+      try { return ok(await issue.getEventSummary(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // 44. 지속 이슈 조회
+  srv.tool(
+    'list_persistent_issues',
+    '장기간 지속 중인 이슈를 조회합니다 (xv3_issue.issue_log_persist). 기본적으로 현재 활성(미종료) 이슈만 반환합니다.',
+    {
+      device_id:   z.number().optional().describe('장비 ID로 필터'),
+      issue_type:  z.enum(['S','C','P','A','F','I','M','N','E','O','R','W']).optional().describe('이벤트 유형 코드 (S=Syslog, C=Threshold, P=Ping 등)'),
+      severity:    z.number().optional().describe('심각도 (1=Critical, 2=Major, 3=Minor, 4=Warning, 5=Normal)'),
+      active_only: z.boolean().optional().default(true).describe('미종료 이슈만 조회 (기본 true)'),
+      limit:       z.number().optional().default(100).describe('최대 반환 건수 (기본 100)'),
+    },
+    async (args) => {
+      try { return ok(await issue.listPersistentIssues(args)); } catch (e) { return err(e); }
     }
   );
 
