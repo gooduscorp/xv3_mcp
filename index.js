@@ -566,7 +566,7 @@ async function startHttp(port) {
     try {
       // ── 기존 세션 요청 라우팅 ──────────────────────────
       if (sessionHdr && sessions.has(sessionHdr)) {
-        await sessions.get(sessionHdr).handleRequest(req, res);
+        await sessions.get(sessionHdr).handleRequest(req, res, req.body);
         return;
       }
 
@@ -584,7 +584,7 @@ async function startHttp(port) {
       };
 
       await createMcpServer().connect(transport);
-      await transport.handleRequest(req, res);
+      await transport.handleRequest(req, res, req.body);
 
       if (transport.sessionId) {
         sessions.set(transport.sessionId, transport);
