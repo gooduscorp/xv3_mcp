@@ -6,8 +6,9 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const express = require('express');
 const { z } = require('zod');
-const get = require('./tools/get');
-const set = require('./tools/set');
+const get  = require('./tools/get');
+const set  = require('./tools/set');
+const perf = require('./tools/perf');
 
 // ────────────────────────────────────────────────────────
 // 헬퍼: 결과를 MCP 텍스트 응답으로 변환
@@ -87,19 +88,19 @@ function createMcpServer() {
   // 4. 장비별 인터페이스 현황 요약
   srv.tool(
     'list_device_interface_summary',
-    'One-call per-device circuit/interface status summary. Use for Korean requests like "장비별 회선현황", "전체 장비 포트 현황", or "site/group device interface summary"; avoids list_devices + repeated get_device_interfaces calls.',
+    '장비별 인터페이스(포트) 현황을 한 번에 조회합니다. "장비별 회선현황", "전체 장비 포트 현황" 요청 시 사용하세요. list_devices + get_device_interfaces 반복 호출을 대체합니다.',
     {
-      site_id:        z.number().optional().describe('Site ID filter'),
+      site_id:        z.number().optional().describe('사이트 ID로 필터'),
       site_name:      z.string().optional().describe('사이트명 부분 검색. site_id 대신 사용 가능'),
       name:           z.string().optional().describe('장비명 부분 검색 (예: Core-SW)'),
-      status:         z.number().optional().describe('Device status filter (1=UP, 0=DOWN)'),
-      vendor:         z.string().optional().describe('Vendor partial match'),
-      device_type_id: z.number().optional().describe('Device type ID filter'),
-      group_id:       z.number().optional().describe('Device group ID filter'),
-      disabled:       z.number().optional().describe('Device disabled filter (0=enabled, 1=disabled)'),
-      admin_status:   z.number().optional().describe('Interface admin status filter (1=UP, 2=DOWN)'),
-      oper_status:    z.number().optional().describe('Interface operational status filter (1=UP, 2=DOWN)'),
-      limit:          z.number().optional().default(100).describe('Maximum devices to return, default 100'),
+      status:         z.number().optional().describe('장비 상태 (1=UP, 0=DOWN)'),
+      vendor:         z.string().optional().describe('벤더명 부분 검색'),
+      device_type_id: z.number().optional().describe('장비 유형 ID'),
+      group_id:       z.number().optional().describe('장비 그룹 ID'),
+      disabled:       z.number().optional().describe('비활성화 여부 (0=활성, 1=비활성)'),
+      admin_status:   z.number().optional().describe('인터페이스 관리 상태 필터 (1=UP, 2=DOWN)'),
+      oper_status:    z.number().optional().describe('인터페이스 운영 상태 필터 (1=UP, 2=DOWN)'),
+      limit:          z.number().optional().default(100).describe('최대 반환 건수 (기본 100)'),
     },
     async (args) => {
       try { return ok(await get.listDeviceInterfaceSummary(args)); } catch (e) { return err(e); }
@@ -256,6 +257,7 @@ function createMcpServer() {
       site_id:   z.number().optional().describe('사이트 ID로 필터'),
       role_type: z.string().optional().describe('역할 유형으로 필터 (ADMIN, USER 등)'),
       group_id:  z.number().optional().describe('사용자 그룹 ID로 필터'),
+      limit:     z.number().optional().default(100).describe('최대 반환 건수 (기본 100)'),
     },
     async (args) => {
       try { return ok(await get.listUsers(args)); } catch (e) { return err(e); }
@@ -528,6 +530,75 @@ function createMcpServer() {
     },
     async (args) => {
       try { return ok(await set.closeIssue(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // ──────────────────────────────────────────────────────
+  // 성능 데이터 (xv3_perf DB)
+  // ──────────────────────────────────────────────────────
+
+  // 38. 수집 항목 목록 조회
+  srv.tool(
+    'list_collect_items',
+    'NMS가 수집하는 성능 항목 목록을 조회합니다. collect_item_id를 확인할 때 사용합니다. (예: CPU=1, Memory=2, In bps=3, Out bps=4, In Util=5, Out Util=6, 온도=9, 응답속도=10)',
+    {},
+    async () => {
+      try { return ok(await perf.listCollectItems()); } catch (e) { return err(e); }
+    }
+  );
+
+  // 39. 장비 레벨 성능 시계열 조회
+  srv.tool(
+    'get_perf_device',
+    '장비 단위 성능 시계열 데이터를 조회합니다. CPU사용률(1), Memory사용률(2), 장비온도(9), 응답속도(10) 등 장비 전체 단위로 수집되는 항목에 사용합니다.',
+    {
+      device_id:       z.number().describe('장비 ID (필수)'),
+      collect_item_id: z.number().optional().describe('수집 항목 ID (생략 시 전체 장비 레벨 항목 반환). CPU=1, Memory=2, 온도=9, 응답속도=10'),
+      granularity:     z.enum(['10min','hourly','daily','monthly']).optional().default('hourly').describe('집계 단위 (기본: hourly)'),
+      from:            z.string().optional().describe('조회 시작 일시 (예: 2026-05-01 00:00:00)'),
+      to:              z.string().optional().describe('조회 종료 일시 (예: 2026-05-12 23:59:59)'),
+      limit:           z.number().optional().default(48).describe('최대 반환 건수 (기본 48, hourly 기준 2일치)'),
+    },
+    async (args) => {
+      try { return ok(await perf.getPerfDevice(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // 40. 인터페이스 레벨 성능 시계열 조회
+  srv.tool(
+    'get_perf_interface',
+    '장비 인터페이스(포트) 단위 성능 시계열 데이터를 조회합니다. 회선사용량 bps(3/4), 회선사용률 Util(5/6), 패킷처리량 PPS(7/8) 등 포트별 항목에 사용합니다.',
+    {
+      device_id:       z.number().describe('장비 ID (필수)'),
+      interface_id:    z.number().optional().describe('인터페이스 ifIndex (생략 시 전체 포트). collect_interface.interface_id 값'),
+      collect_item_id: z.number().optional().describe('수집 항목 ID. In bps=3, Out bps=4, In Util=5, Out Util=6, Out PPS=7, In PPS=8'),
+      if_name:         z.string().optional().describe('인터페이스 이름 부분 검색 (예: Gi1/0/1)'),
+      granularity:     z.enum(['10min','hourly','daily','monthly']).optional().default('hourly').describe('집계 단위 (기본: hourly)'),
+      from:            z.string().optional().describe('조회 시작 일시'),
+      to:              z.string().optional().describe('조회 종료 일시'),
+      limit:           z.number().optional().default(48).describe('최대 반환 건수 (기본 48)'),
+    },
+    async (args) => {
+      try { return ok(await perf.getPerfInterface(args)); } catch (e) { return err(e); }
+    }
+  );
+
+  // 41. Top-N 성능 조회
+  srv.tool(
+    'get_perf_topn',
+    '특정 성능 항목 기준으로 상위 N개 장비 또는 인터페이스를 조회합니다. device_id 없이 호출하면 전체(또는 사이트) 장비 Top N, device_id를 지정하면 해당 장비의 인터페이스 Top N을 반환합니다.',
+    {
+      collect_item_id: z.number().describe('수집 항목 ID (필수). CPU=1, Memory=2, In bps=3, Out bps=4, In Util=5, Out Util=6, 온도=9, 응답속도=10'),
+      granularity:     z.enum(['10min','hourly','daily','monthly']).optional().default('hourly').describe('집계 단위 (기본: hourly)'),
+      from:            z.string().optional().describe('조회 시작 일시'),
+      to:              z.string().optional().describe('조회 종료 일시'),
+      n:               z.number().optional().default(10).describe('상위 N개 (기본 10)'),
+      value_type:      z.enum(['avg','max']).optional().default('avg').describe('순위 기준 (avg=평균, max=최대)'),
+      site_id:         z.number().optional().describe('사이트 필터 (device_id 없을 때 사용)'),
+      device_id:       z.number().optional().describe('지정 시 해당 장비의 인터페이스 Top N 반환'),
+    },
+    async (args) => {
+      try { return ok(await perf.getPerfTopN(args)); } catch (e) { return err(e); }
     }
   );
 

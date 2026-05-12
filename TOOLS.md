@@ -1,7 +1,7 @@
 # XV3 NMS MCP — 지원 도구(Tools) 목록
 
 MCP 서버 이름: `xv3-nms-mcp` (버전 `1.0.0`)
-데이터 소스: XV3 NMS MariaDB (접속 정보는 `.env` 파일로 관리)
+데이터 소스: XV3 NMS MariaDB (`xv3` DB), 성능 DB (`xv3_perf` DB) (접속 정보는 `.env` 파일로 관리)
 
 아래는 `index.js`에 등록된 **JSON-RPC 도구 이름**과 **기능 설명**, **입력 파라미터** 요약입니다.
 
@@ -57,6 +57,10 @@ MCP 서버 이름: `xv3-nms-mcp` (버전 `1.0.0`)
 | 35 | `create_topology_link` | 변경 | 토폴로지 링크 추가 |
 | 36 | `delete_topology_link` | 변경 | 토폴로지 링크 삭제 |
 | 37 | `close_issue` | 변경 | 이슈 수동 종료 |
+| 38 | `list_collect_items` | 성능 | 수집 항목 목록 (collect_item_id 확인용) |
+| 39 | `get_perf_device` | 성능 | 장비 레벨 성능 시계열 (CPU, Memory, 온도 등) |
+| 40 | `get_perf_interface` | 성능 | 인터페이스 레벨 성능 시계열 (bps, Util, PPS) |
+| 41 | `get_perf_topn` | 성능 | Top-N 성능 순위 (전체 장비 또는 특정 장비 포트) |
 
 ---
 
@@ -83,6 +87,8 @@ MCP 서버 이름: `xv3-nms-mcp` (버전 `1.0.0`)
 ### `get_device`
 
 장비 ID 또는 IP로 상세 정보를 조회합니다. (`id` 또는 `ip` 중 하나 필요)
+
+> **보안**: SNMP 커뮤니티 문자열(`ro_community`) 및 CLI 패스워드 필드는 응답에서 제외됩니다.
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -254,6 +260,7 @@ NMS 사용자 목록을 조회합니다.
 | `site_id` | 선택 | 사이트 ID |
 | `role_type` | 선택 | 역할 (ADMIN, USER 등) |
 | `group_id` | 선택 | 사용자 그룹 ID |
+| `limit` | 선택 | 최대 건수 (기본 100) |
 
 ---
 
@@ -338,6 +345,8 @@ NMS 수집기(Collector) 서버 목록과 상태를 조회합니다.
 ### `list_snmp_templates`
 
 SNMP 템플릿 목록을 조회합니다.
+
+> **보안**: `ro_community`(커뮤니티 문자열)는 응답에서 제외됩니다.
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -484,8 +493,95 @@ SNMP 템플릿 목록을 조회합니다.
 
 ---
 
+---
+
+## 성능 도구 (PERF)
+
+> 성능 데이터는 `xv3_perf` DB의 집계 테이블에서 조회합니다. `granularity`로 집계 단위를 선택합니다.
+>
+> **granularity 옵션**: `10min` (10분) / `hourly` (1시간, 기본) / `daily` (일) / `monthly` (월)
+
+---
+
+### `list_collect_items`
+
+NMS가 수집하는 성능 항목 목록을 조회합니다. `collect_item_id` 값을 확인할 때 사용합니다.
+
+파라미터 없음.
+
+**주요 collect_item_id 참고값** (실제 값은 본 도구로 확인하세요):
+
+| ID | 항목명 | 단위 | 수집 레벨 |
+|----|--------|------|----------|
+| 1 | CPU 사용률 | % | 장비 |
+| 2 | Memory 사용률 | % | 장비 |
+| 3 | In bps | bps | 인터페이스 |
+| 4 | Out bps | bps | 인터페이스 |
+| 5 | In Util | % | 인터페이스 |
+| 6 | Out Util | % | 인터페이스 |
+| 7 | Out PPS | pps | 인터페이스 |
+| 8 | In PPS | pps | 인터페이스 |
+| 9 | 온도 | ℃ | 장비 |
+| 10 | 응답속도 | m/s | 장비(Ping) |
+
+---
+
+### `get_perf_device`
+
+장비 단위 성능 시계열 데이터를 조회합니다. CPU, Memory, 온도, 응답속도 등 `interface_id = 0`으로 수집되는 항목에 사용합니다.
+
+| 파라미터 | 필수 | 설명 |
+|----------|------|------|
+| `device_id` | **필수** | 장비 ID |
+| `collect_item_id` | 선택 | 수집 항목 ID (생략 시 전체 장비 레벨 항목 반환) |
+| `granularity` | 선택 | 집계 단위 (`10min` / `hourly` / `daily` / `monthly`, 기본 `hourly`) |
+| `from` | 선택 | 조회 시작 일시 (예: 2026-05-01 00:00:00) |
+| `to` | 선택 | 조회 종료 일시 (예: 2026-05-12 23:59:59) |
+| `limit` | 선택 | 최대 건수 (기본 48 — hourly 기준 2일치) |
+
+---
+
+### `get_perf_interface`
+
+인터페이스(포트) 단위 성능 시계열 데이터를 조회합니다. bps, Util, PPS 등 포트별 항목에 사용합니다.
+
+| 파라미터 | 필수 | 설명 |
+|----------|------|------|
+| `device_id` | **필수** | 장비 ID |
+| `interface_id` | 선택 | 인터페이스 ifIndex (생략 시 전체 포트) |
+| `collect_item_id` | 선택 | 수집 항목 ID |
+| `if_name` | 선택 | 인터페이스 이름 부분 검색 (예: Gi1/0/1) |
+| `granularity` | 선택 | 집계 단위 (기본 `hourly`) |
+| `from` | 선택 | 조회 시작 일시 |
+| `to` | 선택 | 조회 종료 일시 |
+| `limit` | 선택 | 최대 건수 (기본 48) |
+
+---
+
+### `get_perf_topn`
+
+특정 성능 항목 기준으로 Top-N 순위를 조회합니다.
+
+- `device_id` **없음** → 전체(또는 특정 사이트) 장비 Top N
+- `device_id` **있음** + 장비레벨 항목(CPU/Memory 등) → 해당 장비의 instance Top N
+- `device_id` **있음** + 인터페이스레벨 항목(bps/Util 등) → 해당 장비의 포트 Top N
+
+| 파라미터 | 필수 | 설명 |
+|----------|------|------|
+| `collect_item_id` | **필수** | 수집 항목 ID |
+| `granularity` | 선택 | 집계 단위 (기본 `hourly`) |
+| `from` | 선택 | 조회 시작 일시 |
+| `to` | 선택 | 조회 종료 일시 |
+| `n` | 선택 | 상위 N개 (기본 10) |
+| `value_type` | 선택 | 순위 기준 (`avg`=평균, `max`=최대, 기본 `avg`) |
+| `site_id` | 선택 | 사이트 필터 (`device_id` 없을 때 사용) |
+| `device_id` | 선택 | 지정 시 해당 장비 내 Top N 반환 |
+
+---
+
 ## 참고
 
 - 도구 정의의 단일 소스는 `index.js`입니다. 스키마가 바뀌면 이 문서와 함께 갱신하세요.
 - 변경 계열 도구는 NMS DB에 쓰기를 수행합니다. `create_id` / `modify_id`는 `'mcp'`로 기록됩니다.
 - DB 접속 정보는 `.env` 파일로 관리합니다. `.env.example`을 참고하세요.
+- `get_device` 및 `list_snmp_templates`는 SNMP 커뮤니티 문자열(`ro_community`)을 응답에서 제외합니다.

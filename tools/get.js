@@ -45,11 +45,21 @@ async function getDevice({ id, ip } = {}) {
 
   let sql = `
     SELECT
-      d.*,
+      d.id, d.site_id,
       s.name AS site_name, s.site_code,
+      d.name, d.vendor, d.model, d.ip,
+      d.device_type_id,
       dt.name AS device_type_name,
-      snmp.name AS snmp_template_name, snmp.snmp_version, snmp.ro_community,
-      ping.name AS ping_template_name
+      d.status, d.disabled,
+      d.sys_location, d.sys_uptime, d.sys_oid,
+      d.ping_enabled, d.snmp_enabled, d.config_enabled, d.port_collect_enabled,
+      d.ping_template_id, d.snmp_template_id,
+      snmp.name AS snmp_template_name, snmp.snmp_version,
+      ping.name AS ping_template_name,
+      d.service_type, d.service_layer,
+      d.telemetry_enable, d.dnac_device_id,
+      d.description,
+      d.create_date, d.modify_date
     FROM device_info d
     LEFT JOIN site_info s ON s.id = d.site_id
     LEFT JOIN device_type dt ON dt.id = d.device_type_id
@@ -63,14 +73,7 @@ async function getDevice({ id, ip } = {}) {
   else     { sql += ' AND d.ip = ?'; params.push(ip); }
 
   const rows = await query(sql, params);
-  if (!rows.length) return null;
-
-  // 패스워드 필드 제거 (보안)
-  const row = rows[0];
-  delete row.config_id;
-  delete row.config_vt_password;
-  delete row.config_en_password;
-  return row;
+  return rows[0] ?? null;
 }
 
 async function getDeviceInterfaces({ device_id, admin_status, oper_status } = {}) {
@@ -370,7 +373,7 @@ async function getDeviceGroupMembers({ group_id } = {}) {
   `, [group_id]);
 }
 
-async function listUsers({ site_id, role_type, group_id } = {}) {
+async function listUsers({ site_id, role_type, group_id, limit = 100 } = {}) {
   let sql = `
     SELECT
       u.id, u.site_id, s.name AS site_name,
@@ -388,7 +391,8 @@ async function listUsers({ site_id, role_type, group_id } = {}) {
   if (site_id)   { sql += ' AND u.site_id = ?';  params.push(site_id); }
   if (role_type) { sql += ' AND u.role_type = ?'; params.push(role_type); }
   if (group_id)  { sql += ' AND u.group_id = ?'; params.push(group_id); }
-  sql += ' ORDER BY u.site_id, u.name';
+  sql += ' ORDER BY u.site_id, u.name LIMIT ?';
+  params.push(Number(limit));
   return query(sql, params);
 }
 
@@ -508,7 +512,7 @@ async function getDeviceStatusSummary({ site_id } = {}) {
 
 async function listSnmpTemplates({ site_id } = {}) {
   let sql = `
-    SELECT id, site_id, name, snmp_version, ro_community,
+    SELECT id, site_id, name, snmp_version,
            security_level, user_name, auth_protocol, timeout, description
     FROM snmp_template WHERE 1=1
   `;
