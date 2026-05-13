@@ -1,3 +1,4 @@
+'use strict';
 const { query } = require('../db');
 
 async function fetchDeviceBasic(device_id) {
@@ -132,6 +133,7 @@ async function removeDeviceFromGroup({ group_id, device_id } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
   const device = await fetchDeviceBasic(device_id);
+  if (!device) throw new Error(`device_id ${device_id}를 찾을 수 없습니다.`);
 
   const result = await query(
     'DELETE FROM device_group_mapping WHERE group_id = ? AND device_id = ?',
@@ -171,6 +173,18 @@ async function createTopologyLink({ site_id, source_device_id, target_device_id,
   if (!site_id)           throw new Error('site_id는 필수입니다.');
   if (!source_device_id)  throw new Error('source_device_id는 필수입니다.');
   if (!target_device_id)  throw new Error('target_device_id는 필수입니다.');
+  if (source_device_id === target_device_id) {
+    throw new Error('source_device_id와 target_device_id는 서로 달라야 합니다.');
+  }
+
+  // 장비 존재 여부 확인
+  const devices = await query(
+    'SELECT id FROM device_info WHERE id IN (?, ?) AND deleted = 0',
+    [source_device_id, target_device_id]
+  );
+  if (devices.length < 2) {
+    throw new Error('source 또는 target 장비를 찾을 수 없습니다.');
+  }
 
   const existing = await query(
     `SELECT id FROM topology_links

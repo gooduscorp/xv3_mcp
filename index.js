@@ -700,7 +700,7 @@ async function startHttp(port) {
 
       // ── 새 세션 생성 ──────────────────────────────────
       const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => Math.random().toString(36).slice(2),
+        sessionIdGenerator: () => require('crypto').randomUUID(),
       });
 
       transport.onerror = (e) => httpLog(`transport error [${transport.sessionId}]: ${e?.message ?? e}`);
@@ -743,7 +743,7 @@ async function main() {
   const httpIdx = args.indexOf('--http');
 
   if (httpIdx !== -1) {
-    const port = parseInt(args[httpIdx + 1], 10) || 3333;
+    const port = parseInt(args[httpIdx + 1], 10) || 3334;
     await startHttp(port);
   } else {
     await startStdio();

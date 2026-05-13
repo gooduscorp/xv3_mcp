@@ -182,7 +182,7 @@ async function getPerfTopN({
       if (to)   { sql += ' AND p.insert_date <= ?'; params.push(to); }
 
       sql += ` GROUP BY p.device_id, p.instance_id ORDER BY value DESC LIMIT ?`;
-      params.push(n);
+      params.push(Number(n));
       return query(sql, params);
     }
 
@@ -216,7 +216,7 @@ async function getPerfTopN({
     if (to)   { sql += ' AND p.insert_date <= ?'; params.push(to); }
 
     sql += ` GROUP BY p.device_id, p.interface_id ORDER BY value DESC LIMIT ?`;
-    params.push(n);
+    params.push(Number(n));
     return query(sql, params);
   }
 
@@ -246,7 +246,7 @@ async function getPerfTopN({
   if (to)   { sql += ' AND p.insert_date <= ?'; params.push(to); }
 
   sql += ` GROUP BY p.device_id ORDER BY value DESC LIMIT ?`;
-  params.push(n);
+  params.push(Number(n));
   return query(sql, params);
 }
 
