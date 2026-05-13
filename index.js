@@ -680,6 +680,16 @@ async function startHttp(port) {
   // sessionId → StreamableHTTPServerTransport
   const sessions = new Map();
 
+  // API Key 인증 미들웨어 (MCP_API_KEY가 설정된 경우에만 적용)
+  const API_KEY = process.env.MCP_API_KEY || '';
+  app.use('/mcp', (req, res, next) => {
+    if (!API_KEY) return next(); // 키 미설정 시 인증 비활성화
+    const auth = req.headers['authorization'] ?? '';
+    if (auth === `Bearer ${API_KEY}`) return next();
+    httpLog(`인증 실패 | from=${req.socket?.remoteAddress ?? req.ip ?? '-'} | auth=${auth || '(없음)'}`);
+    res.status(401).json({ error: 'Unauthorized: MCP_API_KEY가 일치하지 않습니다.' });
+  });
+
   app.all('/mcp', async (req, res) => {
     const remote     = req.socket?.remoteAddress ?? req.ip ?? '-';
     const sessionHdr = req.headers['mcp-session-id'] ?? null;
