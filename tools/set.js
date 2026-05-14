@@ -1,5 +1,6 @@
 'use strict';
 const { query } = require('../db');
+const { getMonthlyTables } = require('./issueHelper');
 
 async function fetchDeviceBasic(device_id) {
   const rows = await query(
@@ -230,43 +231,44 @@ async function deleteTopologyLink({ link_id } = {}) {
 async function closeIssue({ issue_id } = {}) {
   if (!issue_id) throw new Error('issue_id는 필수입니다.');
 
-  // 1. xv3.issue_log_01
-  const r1 = await query(
-    `UPDATE xv3.issue_log_01 SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
-    [issue_id]
-  );
-  if (r1.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3.issue_log_01' };
-
-  const existing1 = await query('SELECT end_date FROM xv3.issue_log_01 WHERE id = ?', [issue_id]);
-  if (existing1.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing1[0].end_date})`);
-  }
-
-  // 2. xv3_issue.issue_log
-  const r2 = await query(
-    `UPDATE xv3_issue.issue_log SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
-    [issue_id]
-  );
-  if (r2.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3_issue.issue_log' };
-
-  const existing2 = await query('SELECT end_date FROM xv3_issue.issue_log WHERE id = ?', [issue_id]);
-  if (existing2.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing2[0].end_date})`);
-  }
-
-  // 3. xv3_issue.issue_log_persist
-  const r3 = await query(
+  // 1단계: persist 테이블 UPDATE (현재 활성 이슈의 단일 출처)
+  const rPersist = await query(
     `UPDATE xv3_issue.issue_log_persist SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
     [issue_id]
   );
-  if (r3.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3_issue.issue_log_persist' };
+  if (rPersist.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3_issue.issue_log_persist' };
 
-  const existing3 = await query('SELECT end_date FROM xv3_issue.issue_log_persist WHERE id = ?', [issue_id]);
-  if (existing3.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing3[0].end_date})`);
+  // 2단계: 월별 파티션 테이블에서 UPDATE 시도 (이번 달 포함 최근 3개월)
+  const available = await getMonthlyTables();
+  const now = new Date();
+  const recentMonths = [0, 1, 2].map(offset => {
+    const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    return `issue_log_${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const recentTables = recentMonths.filter(t => available.includes(t));
+
+  for (const t of recentTables) {
+    const r = await query(
+      `UPDATE xv3_issue.${t} SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
+      [issue_id]
+    );
+    if (r.affectedRows > 0) return { success: true, issue_id, closed_in: `xv3_issue.${t}` };
   }
 
-  throw new Error(`issue_id ${issue_id}를 찾을 수 없습니다. (xv3.issue_log_01, xv3_issue.issue_log, xv3_issue.issue_log_persist 모두 조회)`);
+  // 3단계: "이미 종료" vs "존재하지 않음" 구분 — persist + 최근 3개월 병렬 조회
+  const checks = await Promise.all([
+    query('SELECT end_date FROM xv3_issue.issue_log_persist WHERE id = ?', [issue_id]),
+    ...recentTables.map(t =>
+      query(`SELECT end_date FROM xv3_issue.${t} WHERE id = ?`, [issue_id]).catch(() => [])
+    ),
+  ]);
+
+  const found = checks.flat().find(r => r != null);
+  if (found) {
+    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${found.end_date})`);
+  }
+
+  throw new Error(`issue_id ${issue_id}를 찾을 수 없습니다. (persist, 최근 ${recentTables.length}개월 파티션 테이블 조회)`);
 }
 
 module.exports = {
