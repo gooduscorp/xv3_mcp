@@ -230,40 +230,27 @@ async function deleteTopologyLink({ link_id } = {}) {
 async function closeIssue({ issue_id } = {}) {
   if (!issue_id) throw new Error('issue_id는 필수입니다.');
 
-  // 1. xv3.issue_log_01
-  const r1 = await query(
-    `UPDATE xv3.issue_log_01 SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
-    [issue_id]
-  );
+  // 3개 테이블에 UPDATE를 동시에 실행 (순차 6회 → 병렬 1회)
+  const [r1, r2, r3] = await Promise.all([
+    query(`UPDATE xv3.issue_log_01 SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`, [issue_id]),
+    query(`UPDATE xv3_issue.issue_log SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`, [issue_id]),
+    query(`UPDATE xv3_issue.issue_log_persist SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`, [issue_id]),
+  ]);
+
   if (r1.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3.issue_log_01' };
-
-  const existing1 = await query('SELECT end_date FROM xv3.issue_log_01 WHERE id = ?', [issue_id]);
-  if (existing1.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing1[0].end_date})`);
-  }
-
-  // 2. xv3_issue.issue_log
-  const r2 = await query(
-    `UPDATE xv3_issue.issue_log SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
-    [issue_id]
-  );
   if (r2.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3_issue.issue_log' };
-
-  const existing2 = await query('SELECT end_date FROM xv3_issue.issue_log WHERE id = ?', [issue_id]);
-  if (existing2.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing2[0].end_date})`);
-  }
-
-  // 3. xv3_issue.issue_log_persist
-  const r3 = await query(
-    `UPDATE xv3_issue.issue_log_persist SET end_date = NOW(), modify_date = NOW() WHERE id = ? AND end_date IS NULL`,
-    [issue_id]
-  );
   if (r3.affectedRows > 0) return { success: true, issue_id, closed_in: 'xv3_issue.issue_log_persist' };
 
-  const existing3 = await query('SELECT end_date FROM xv3_issue.issue_log_persist WHERE id = ?', [issue_id]);
-  if (existing3.length > 0) {
-    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${existing3[0].end_date})`);
+  // UPDATE 모두 실패 시: 이미 종료된 이슈인지 vs 존재하지 않는 이슈인지 구분 (병렬 조회)
+  const [e1, e2, e3] = await Promise.all([
+    query('SELECT end_date FROM xv3.issue_log_01 WHERE id = ?', [issue_id]),
+    query('SELECT end_date FROM xv3_issue.issue_log WHERE id = ?', [issue_id]),
+    query('SELECT end_date FROM xv3_issue.issue_log_persist WHERE id = ?', [issue_id]),
+  ]);
+
+  const already = e1[0] ?? e2[0] ?? e3[0];
+  if (already) {
+    throw new Error(`issue_id ${issue_id}는 이미 종료된 이슈입니다. (종료일시: ${already.end_date})`);
   }
 
   throw new Error(`issue_id ${issue_id}를 찾을 수 없습니다. (xv3.issue_log_01, xv3_issue.issue_log, xv3_issue.issue_log_persist 모두 조회)`);
