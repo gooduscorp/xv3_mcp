@@ -1,5 +1,6 @@
 'use strict';
 const { query } = require('../db');
+const { resolveIssueTables } = require('./issueHelper');
 
 // ──────────────────────────────────────────────
 // 장비(Device) 조회
@@ -214,25 +215,26 @@ async function getDeviceCamTable({ device_id, interface_id, mac, ip, limit = 200
 async function searchByIp({ ip } = {}) {
   if (!ip) throw new Error('ip는 필수입니다.');
 
-  const devices = await query(`
-    SELECT id, site_id, name, ip, vendor, model, status, disabled
-    FROM device_info
-    WHERE ip LIKE ? AND deleted = 0
-    LIMIT 20
-  `, [`%${ip}%`]);
-
-  const interfaces = await query(`
-    SELECT
-      iip.device_id, d.name AS device_name, d.ip AS device_ip,
-      iip.interface_ip, iip.network_ip, iip.network_mask,
-      ci.name AS interface_name
-    FROM collect_interface_ip iip
-    JOIN device_info d ON d.id = iip.device_id
-    LEFT JOIN collect_interface ci
-      ON ci.device_id = iip.device_id AND ci.interface_id = iip.interface_id
-    WHERE iip.interface_ip LIKE ? AND d.deleted = 0
-    LIMIT 20
-  `, [`%${ip}%`]);
+  const [devices, interfaces] = await Promise.all([
+    query(`
+      SELECT id, site_id, name, ip, vendor, model, status, disabled
+      FROM device_info
+      WHERE ip LIKE ? AND deleted = 0
+      LIMIT 20
+    `, [`%${ip}%`]),
+    query(`
+      SELECT
+        iip.device_id, d.name AS device_name, d.ip AS device_ip,
+        iip.interface_ip, iip.network_ip, iip.network_mask,
+        ci.name AS interface_name
+      FROM collect_interface_ip iip
+      JOIN device_info d ON d.id = iip.device_id
+      LEFT JOIN collect_interface ci
+        ON ci.device_id = iip.device_id AND ci.interface_id = iip.interface_id
+      WHERE iip.interface_ip LIKE ? AND d.deleted = 0
+      LIMIT 20
+    `, [`%${ip}%`]),
+  ]);
 
   return { devices, interfaces };
 }
@@ -262,37 +264,69 @@ async function listAlarms({ device_ip, device_name, start_date, end_date, limit 
 }
 
 async function listIssues({ device_id, severity, issue_type, start_date, end_date, active_only, limit = 100 } = {}) {
-  let sql = `
-    SELECT
-      il.id, il.device_id,
-      d.name AS device_name, d.ip AS device_ip,
-      il.issue_type,
-      it.issue_name AS issue_type_name,
-      il.severity,
-      ise.severity AS severity_name,
-      il.interface_name, il.instance_name,
-      il.message, il.count,
-      il.create_date, il.modify_date, il.end_date,
-      il.is_display
-    FROM issue_log_01 il
-    LEFT JOIN device_info d ON d.id = il.device_id
-    LEFT JOIN issue_type it ON it.issue_code = il.issue_type
-    LEFT JOIN issue_severity ise ON ise.id = il.severity
-    WHERE 1=1
+  const { monthly, usePersist, persistBefore } = await resolveIssueTables({ start_date, end_date, active_only });
+
+  const targets = [
+    ...monthly.map(t => ({ table: t, persistBefore: null })),
+    ...(usePersist ? [{ table: 'issue_log_persist', persistBefore }] : []),
+  ];
+
+  if (targets.length === 0) return [];
+
+  const lim = Number(limit);
+
+  const ISSUE_SELECT = `
+    il.id, il.device_id,
+    d.name AS device_name, d.ip AS device_ip,
+    il.issue_type,
+    it.issue_name AS issue_type_name,
+    il.severity,
+    ise.severity AS severity_name,
+    il.interface_name, il.instance_name,
+    il.message, il.count,
+    il.create_date, il.modify_date, il.end_date,
+    il.is_display
   `;
-  const params = [];
+  const ISSUE_JOINS = `
+    LEFT JOIN xv3.device_info d      ON d.id          = il.device_id
+    LEFT JOIN xv3.issue_type it      ON it.issue_code  = il.issue_type
+    LEFT JOIN xv3.issue_severity ise ON ise.id         = il.severity
+  `;
 
-  if (device_id)   { sql += ' AND il.device_id = ?';   params.push(device_id); }
-  if (severity)    { sql += ' AND il.severity = ?';    params.push(severity); }
-  if (issue_type)  { sql += ' AND il.issue_type = ?';  params.push(issue_type); }
-  if (start_date)  { sql += ' AND il.create_date >= ?'; params.push(start_date); }
-  if (end_date)    { sql += ' AND il.create_date <= ?'; params.push(end_date); }
-  if (active_only) { sql += ' AND il.end_date IS NULL'; }
+  const buildWhere = (pb) => {
+    const conds = ['1=1'];
+    const params = [];
+    if (device_id != null) { conds.push('il.device_id = ?');    params.push(device_id); }
+    if (severity != null)  { conds.push('il.severity = ?');     params.push(severity); }
+    if (issue_type)        { conds.push('il.issue_type = ?');   params.push(issue_type); }
+    if (start_date)        { conds.push('il.create_date >= ?'); params.push(start_date); }
+    if (end_date)          { conds.push('il.create_date <= ?'); params.push(end_date); }
+    if (active_only)       { conds.push('il.end_date IS NULL'); }
+    if (pb)                { conds.push('il.create_date < ?');  params.push(pb); }
+    return { where: conds.join(' AND '), params };
+  };
 
-  sql += ' ORDER BY il.modify_date DESC LIMIT ?';
-  params.push(Number(limit));
+  if (targets.length === 1) {
+    const { table, persistBefore: pb } = targets[0];
+    const { where, params } = buildWhere(pb);
+    return query(
+      `SELECT ${ISSUE_SELECT} FROM xv3_issue.${table} il ${ISSUE_JOINS} WHERE ${where} ORDER BY il.modify_date DESC LIMIT ?`,
+      [...params, lim]
+    );
+  }
 
-  return query(sql, params);
+  const allParams = [];
+  const subqueries = targets.map(({ table, persistBefore: pb }) => {
+    const { where, params } = buildWhere(pb);
+    allParams.push(...params, lim);
+    return `(SELECT ${ISSUE_SELECT} FROM xv3_issue.${table} il ${ISSUE_JOINS} WHERE ${where} ORDER BY il.modify_date DESC LIMIT ?)`;
+  });
+  allParams.push(lim);
+
+  return query(
+    `SELECT * FROM (${subqueries.join(' UNION ALL ')}) _combined ORDER BY modify_date DESC LIMIT ?`,
+    allParams
+  );
 }
 
 async function getIssueSummary({ device_id, site_id } = {}) {
@@ -441,12 +475,21 @@ async function getTopologyLinks({ map_id, site_id } = {}) {
     FROM topology_links l
     LEFT JOIN device_info d_s ON d_s.id = l.source
     LEFT JOIN device_info d_t ON d_t.id = l.target
-    WHERE 1=1
   `;
   const params = [];
-  if (map_id != null)  { sql += ' AND l.source IN (SELECT device_id FROM topology_nodes WHERE map_id = ?) AND l.target IN (SELECT device_id FROM topology_nodes WHERE map_id = ?)'; params.push(map_id, map_id); }
+
+  if (map_id != null) {
+    sql += `
+      JOIN topology_nodes tn_s ON tn_s.device_id = l.source AND tn_s.map_id = ?
+      JOIN topology_nodes tn_t ON tn_t.device_id = l.target AND tn_t.map_id = ?
+    `;
+    params.push(map_id, map_id);
+  }
+
+  sql += ' WHERE 1=1';
   if (site_id != null) { sql += ' AND l.site_id = ?'; params.push(site_id); }
   sql += ' ORDER BY l.id';
+
   return query(sql, params);
 }
 
