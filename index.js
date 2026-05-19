@@ -553,7 +553,8 @@ function createMcpServer() {
   // 39. 장비 레벨 성능 시계열 조회
   srv.tool(
     'get_perf_device',
-    '장비 단위 성능 시계열 데이터를 조회합니다. CPU사용률(1), Memory사용률(2), 장비온도(9), 응답속도(10) 등 장비 전체 단위로 수집되는 항목에 사용합니다.',
+    '장비 단위 성능 시계열 데이터를 조회합니다. CPU사용률(1), Memory사용률(2), 장비온도(9), 응답속도(10) 등 장비 전체 단위로 수집되는 항목에 사용합니다. ' +
+    '"특정 장비의 CPU 추이", "장비 메모리 그래프", "어제 CPU 사용률 보여줘" 등의 요청에 사용하세요.',
     {
       device_id:       z.number().describe('장비 ID (필수)'),
       collect_item_id: z.number().optional().describe('수집 항목 ID (생략 시 전체 장비 레벨 항목 반환). CPU=1, Memory=2, 온도=9, 응답속도=10'),
@@ -570,7 +571,8 @@ function createMcpServer() {
   // 40. 인터페이스 레벨 성능 시계열 조회
   srv.tool(
     'get_perf_interface',
-    '장비 인터페이스(포트) 단위 성능 시계열 데이터를 조회합니다. 회선사용량 bps(3/4), 회선사용률 Util(5/6), 패킷처리량 PPS(7/8) 등 포트별 항목에 사용합니다.',
+    '장비 인터페이스(포트) 단위 성능 시계열 데이터를 조회합니다. 회선사용량 bps(3/4), 회선사용률 Util(5/6), 패킷처리량 PPS(7/8) 등 포트별 항목에 사용합니다. ' +
+    '"포트 트래픽 추이", "회선 사용량 그래프", "특정 인터페이스 bps 보여줘" 등의 요청에 사용하세요.',
     {
       device_id:       z.number().describe('장비 ID (필수)'),
       interface_id:    z.number().optional().describe('인터페이스 ifIndex (생략 시 전체 포트). collect_interface.interface_id 값'),
@@ -589,16 +591,19 @@ function createMcpServer() {
   // 41. Top-N 성능 조회
   srv.tool(
     'get_perf_topn',
-    '특정 성능 항목 기준으로 상위 N개 장비 또는 인터페이스를 조회합니다. device_id 없이 호출하면 전체(또는 사이트) 장비 Top N, device_id를 지정하면 해당 장비의 인터페이스 Top N을 반환합니다.',
+    'CPU/메모리/회선사용률 등 성능 항목 기준으로 상위 N개 장비 또는 인터페이스를 조회합니다. ' +
+    '"CPU 높은 장비 TOP 5", "메모리 많이 쓰는 장비", "회선 사용량 많은 포트", "성능 순위", "Top N 조회", "성능 top3 조회해줘" 등의 요청에 사용하세요. ' +
+    'collect_item_id 미지정 시 CPU(1) 기준으로 조회합니다. ' +
+    'device_id 없이 호출하면 전체(또는 사이트) 장비 Top N, device_id 지정 시 해당 장비의 인터페이스 Top N을 반환합니다.',
     {
-      collect_item_id: z.number().describe('수집 항목 ID (필수). CPU=1, Memory=2, In bps=3, Out bps=4, In Util=5, Out Util=6, 온도=9, 응답속도=10'),
+      collect_item_id: z.number().optional().default(1).describe('수집 항목 ID (기본값 1=CPU). CPU=1, Memory=2, In bps=3, Out bps=4, In Util=5, Out Util=6, 온도=9, 응답속도=10. 항목 전체 목록은 list_collect_items 참고'),
       granularity:     z.enum(['10min','hourly','daily','monthly']).optional().default('hourly').describe('집계 단위 (기본: hourly)'),
       from:            z.string().optional().describe('조회 시작 일시'),
       to:              z.string().optional().describe('조회 종료 일시'),
-      n:               z.number().optional().default(10).describe('상위 N개 (기본 10)'),
-      value_type:      z.enum(['avg','max']).optional().default('avg').describe('순위 기준 (avg=평균, max=최대)'),
-      site_id:         z.number().optional().describe('사이트 필터 (device_id 없을 때 사용)'),
-      device_id:       z.number().optional().describe('지정 시 해당 장비의 인터페이스 Top N 반환'),
+      n:               z.number().optional().default(10).describe('상위 N개 (기본 10). "top3", "상위 5개" 요청 시 해당 숫자로 지정'),
+      value_type:      z.enum(['avg','max']).optional().default('avg').describe('순위 기준 (avg=평균, max=최대. 기본 avg)'),
+      site_id:         z.number().optional().describe('사이트 필터 (device_id 없을 때 사용 가능)'),
+      device_id:       z.number().optional().describe('지정 시 해당 장비의 인터페이스 Top N 반환. 미지정 시 전체 장비 Top N'),
     },
     async (args) => {
       try { return ok(await perf.getPerfTopN(args)); } catch (e) { return err(e); }

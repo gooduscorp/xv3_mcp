@@ -144,7 +144,8 @@ async function getPerfTopN({
   site_id,
   device_id,
 }) {
-  if (collect_item_id == null) throw new Error('collect_item_id는 필수입니다.');
+  // collect_item_id 미지정 시 CPU(1) 기본값 사용
+  const itemId = collect_item_id ?? 1;
 
   const tbl = perfTable(granularity);
   const valueExpr = value_type === 'max' ? 'MAX(p.max_value)' : 'AVG(p.avg_value)';
@@ -152,7 +153,7 @@ async function getPerfTopN({
   // ── 특정 장비: 장비레벨(CPU/Memory 등) vs 인터페이스레벨 자동 판별 ──
   if (device_id != null) {
     const itemRows = await query(
-      'SELECT collect_type FROM xv3.collect_item WHERE id = ?', [collect_item_id]
+      'SELECT collect_type FROM xv3.collect_item WHERE id = ?', [itemId]
     );
     const isInterface = itemRows[0]?.collect_type === 'INTERFACE';
 
@@ -176,7 +177,7 @@ async function getPerfTopN({
           AND p.collect_item_id = ?
           AND p.interface_id   = 0
       `;
-      const params = [device_id, collect_item_id];
+      const params = [device_id, itemId];
 
       if (from) { sql += ' AND p.insert_date >= ?'; params.push(from); }
       if (to)   { sql += ' AND p.insert_date <= ?'; params.push(to); }
@@ -210,7 +211,7 @@ async function getPerfTopN({
         AND p.collect_item_id = ?
         AND p.interface_id   != 0
     `;
-    const params = [device_id, collect_item_id];
+    const params = [device_id, itemId];
 
     if (from) { sql += ' AND p.insert_date >= ?'; params.push(from); }
     if (to)   { sql += ' AND p.insert_date <= ?'; params.push(to); }
@@ -239,7 +240,7 @@ async function getPerfTopN({
     WHERE p.collect_item_id = ?
       AND p.interface_id   = 0
   `;
-  const params = [collect_item_id];
+  const params = [itemId];
 
   if (site_id != null) { sql += ' AND d.site_id = ?'; params.push(site_id); }
   if (from) { sql += ' AND p.insert_date >= ?'; params.push(from); }
