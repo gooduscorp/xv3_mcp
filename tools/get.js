@@ -307,7 +307,7 @@ async function getIssueSummary({ device_id, site_id } = {}) {
   }
   if (site_id != null) {
     deviceJoin = 'JOIN xv3.device_info d ON d.id = il.device_id AND d.site_id = ?';
-    params.unshift(site_id);
+    params.push(site_id);
   }
 
   const sql = `
