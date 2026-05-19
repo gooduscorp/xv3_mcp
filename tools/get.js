@@ -297,14 +297,16 @@ async function listIssues({ device_id, severity, issue_type, start_date, end_dat
 
 async function getIssueSummary({ device_id, site_id } = {}) {
   const params = [];
+  // 활성 이슈 집계는 issue_log_persist (단일 출처) 사용 → JOIN으로 site_id 필터 최적화
   let onClause = 'il.severity = ise.id AND il.end_date IS NULL';
+  let deviceJoin = '';
 
   if (device_id != null) {
     onClause += ' AND il.device_id = ?';
     params.push(device_id);
   }
   if (site_id != null) {
-    onClause += ' AND EXISTS (SELECT 1 FROM device_info d WHERE d.id = il.device_id AND d.site_id = ?)';
+    deviceJoin = 'JOIN xv3.device_info d ON d.id = il.device_id AND d.site_id = ?';
     params.push(site_id);
   }
 
@@ -313,8 +315,9 @@ async function getIssueSummary({ device_id, site_id } = {}) {
       ise.id AS severity_id,
       ise.severity AS severity_name,
       COUNT(il.id) AS count
-    FROM issue_severity ise
-    LEFT JOIN issue_log_01 il ON ${onClause}
+    FROM xv3.issue_severity ise
+    LEFT JOIN xv3_issue.issue_log_persist il ON ${onClause}
+    ${deviceJoin}
     GROUP BY ise.id, ise.severity
     ORDER BY ise.id
   `;
