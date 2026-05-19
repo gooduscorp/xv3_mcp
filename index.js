@@ -5,6 +5,7 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const express = require('express');
+const { randomUUID } = require('crypto');
 const { z } = require('zod');
 const get   = require('./tools/get');
 const set   = require('./tools/set');
@@ -713,7 +714,7 @@ async function startHttp(port) {
 
       // ── 새 세션 생성 ──────────────────────────────────
       const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => require('crypto').randomUUID(),
+        sessionIdGenerator: () => randomUUID(),
       });
 
       transport.onerror = (e) => httpLog(`transport error [${transport.sessionId}]: ${e?.message ?? e}`);

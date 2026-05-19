@@ -105,20 +105,17 @@ async function addDeviceToGroup({ group_id, device_id } = {}) {
   if (!group_id) throw new Error('group_id는 필수입니다.');
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
-  // 장비 존재 확인
-  const devices = await query('SELECT id, name, ip FROM device_info WHERE id = ? AND deleted = 0', [device_id]);
+  // device / group / 멤버 여부 병렬 검증
+  const [devices, groups, member] = await Promise.all([
+    query('SELECT id, name, ip FROM device_info WHERE id = ? AND deleted = 0', [device_id]),
+    query('SELECT id FROM device_group WHERE id = ?', [group_id]),
+    query('SELECT id FROM device_group_mapping WHERE group_id = ? AND device_id = ?', [group_id, device_id]),
+  ]);
+
   if (!devices.length) throw new Error(`device_id ${device_id}를 찾을 수 없습니다.`);
+  if (!groups.length)  throw new Error(`group_id ${group_id}를 찾을 수 없습니다.`);
   const device = devices[0];
 
-  // 그룹 존재 확인
-  const groups = await query('SELECT id FROM device_group WHERE id = ?', [group_id]);
-  if (!groups.length) throw new Error(`group_id ${group_id}를 찾을 수 없습니다.`);
-
-  // 이미 멤버인지 확인
-  const member = await query(
-    'SELECT id FROM device_group_mapping WHERE group_id = ? AND device_id = ?',
-    [group_id, device_id]
-  );
   if (member.length > 0) return { success: true, already_member: true, group_id, device_id, device_name: device.name, device_ip: device.ip };
 
   const result = await query(
