@@ -125,7 +125,7 @@ async function getEventSummary({ device_id, site_id, start_date, end_date } = {}
   if (targets.length === 0) return { total: 0, by_type: [], by_severity: [] };
 
   const deviceJoin = site_id != null ? 'LEFT JOIN xv3.device_info d ON d.id = il.device_id' : '';
-
+  
   const buildAggWhere = (persistBefore) => {
     const conds = ['1=1'];
     const params = [];
