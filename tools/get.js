@@ -380,7 +380,7 @@ async function listSites() {
     ORDER BY id
   `);
 }
-
+// 
 async function listDeviceGroups({ site_id, name } = {}) {
   let sql = `
     SELECT g.id, g.site_id, s.name AS site_name,
