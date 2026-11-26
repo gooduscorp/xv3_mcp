@@ -115,6 +115,12 @@ describe('MCP tools (REST API integration)', () => {
     assert.match(calls[1].url, /collectType=D/);
   });
 
+  it('perf.getPerfInterface handles HashMap object responses safely', async () => {
+    global.fetch = async () => mockJson({});
+    const res = await perfTools.getPerfInterface({ device_id: 1, collect_item_id: 3, if_name: 'Gi1/0/1' });
+    assert.deepEqual(res, {});
+  });
+
   it('issue.getEventSummary aggregates issue-history by type and severity', async () => {
     global.fetch = async () =>
       mockJson({

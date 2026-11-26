@@ -19,6 +19,22 @@ async function listCollectItems() {
   return api.get('/xv3/api/collect-item');
 }
 
+function formatPerfResult(data, limit, if_name) {
+  if (Array.isArray(data)) {
+    const filtered = if_name
+      ? data.filter(r => (r.ifName ?? r.if_name ?? '').includes(if_name))
+      : data;
+    return filtered.slice(0, limit);
+  }
+  if (data && Array.isArray(data.content)) {
+    const filtered = if_name
+      ? data.content.filter(r => (r.ifName ?? r.if_name ?? '').includes(if_name))
+      : data.content;
+    return filtered.slice(0, limit);
+  }
+  return data ?? [];
+}
+
 // ──────────────────────────────────────────────
 // 장비 레벨 성능 조회 (CPU, Memory, 온도 등)
 // ──────────────────────────────────────────────
@@ -35,7 +51,7 @@ async function getPerfDevice({ device_id, collect_item_id, granularity = 'hourly
     if (from) body.start_time = from;
     if (to)   body.end_time   = to;
     const data = await api.post('/xv3/api/perf-raw', body);
-    return Array.isArray(data) ? data.slice(0, limit) : (data ?? []);
+    return formatPerfResult(data, limit);
   }
 
   const endpoint = type === 'daily' ? '/xv3/api/perf-daily' : '/xv3/api/perf-monthly';
@@ -45,7 +61,7 @@ async function getPerfDevice({ device_id, collect_item_id, granularity = 'hourly
   if (to)   params.endDate   = to;
 
   const data = await api.get(endpoint, params);
-  return Array.isArray(data) ? data.slice(0, limit) : (data ?? []);
+  return formatPerfResult(data, limit);
 }
 
 // ──────────────────────────────────────────────
@@ -65,9 +81,7 @@ async function getPerfInterface({ device_id, interface_id, collect_item_id, if_n
     if (from) body.start_time = from;
     if (to)   body.end_time   = to;
     const data = await api.post('/xv3/api/perf-raw', body);
-    let arr = Array.isArray(data) ? data : (data ?? []);
-    if (if_name) arr = arr.filter(r => (r.ifName ?? r.if_name ?? '').includes(if_name));
-    return arr.slice(0, limit);
+    return formatPerfResult(data, limit, if_name);
   }
 
   const endpoint = type === 'daily' ? '/xv3/api/perf-daily' : '/xv3/api/perf-monthly';
@@ -78,9 +92,7 @@ async function getPerfInterface({ device_id, interface_id, collect_item_id, if_n
   if (to)   params.endDate   = to;
 
   const data = await api.get(endpoint, params);
-  let arr = Array.isArray(data) ? data : (data ?? []);
-  if (if_name) arr = arr.filter(r => (r.ifName ?? r.if_name ?? '').includes(if_name));
-  return arr.slice(0, limit);
+  return formatPerfResult(data, limit, if_name);
 }
 
 // ──────────────────────────────────────────────
