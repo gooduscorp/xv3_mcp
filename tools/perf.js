@@ -27,8 +27,11 @@ async function getPerfDevice({ device_id, collect_item_id, granularity = 'hourly
   const { type, collectType } = granularityToEndpoint(granularity);
 
   if (type === 'raw') {
-    const body = { device_id, collect_type: collectType };
-    if (collect_item_id != null) body.collect_item_id = collect_item_id;
+    const body = {
+      device_id,
+      collect_type: collectType,
+      collect_item_id_list: collect_item_id != null ? [collect_item_id] : [1, 2, 9, 10],
+    };
     if (from) body.start_time = from;
     if (to)   body.end_time   = to;
     const data = await api.post('/xv3/api/perf-raw', body);
@@ -53,9 +56,12 @@ async function getPerfInterface({ device_id, interface_id, collect_item_id, if_n
   const { type, collectType } = granularityToEndpoint(granularity);
 
   if (type === 'raw') {
-    const body = { device_id, collect_type: collectType };
-    if (interface_id != null)    body.interface_id    = interface_id;
-    if (collect_item_id != null) body.collect_item_id = collect_item_id;
+    const body = {
+      device_id,
+      collect_type: collectType,
+      collect_item_id_list: collect_item_id != null ? [collect_item_id] : [3, 4, 5, 6],
+    };
+    if (interface_id != null) body.interface_id = interface_id;
     if (from) body.start_time = from;
     if (to)   body.end_time   = to;
     const data = await api.post('/xv3/api/perf-raw', body);

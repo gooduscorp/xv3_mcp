@@ -228,10 +228,17 @@ async function getDeviceCamTable({ device_id, interface_id, mac, ip, limit = 200
 async function searchByIp({ ip } = {}) {
   if (!ip) throw new Error('ip는 필수입니다.');
 
-  const [deviceData, ifaceData] = await Promise.all([
-    api.get('/xv3/api/device-all-list', { keyword: ip }).catch(() => []),
-    api.get('/xv3/api/interface-arp', { ip, size: 20 }).catch(() => null),
+  const [deviceRes, ifaceRes] = await Promise.allSettled([
+    api.get('/xv3/api/device-all-list', { keyword: ip }),
+    api.get('/xv3/api/interface-arp', { ip, size: 20 }),
   ]);
+
+  if (deviceRes.status === 'rejected' && ifaceRes.status === 'rejected') {
+    throw deviceRes.reason;
+  }
+
+  const deviceData = deviceRes.status === 'fulfilled' ? deviceRes.value : [];
+  const ifaceData  = ifaceRes.status === 'fulfilled' ? ifaceRes.value : null;
 
   const devices    = (Array.isArray(deviceData) ? deviceData : []).filter(d => d.ip?.includes(ip));
   const interfaces = extractItems(ifaceData);
@@ -348,7 +355,7 @@ async function listDeviceGroups({ site_id, name } = {}) {
 
 async function getDeviceGroupMembers({ group_id } = {}) {
   if (!group_id) throw new Error('group_id는 필수입니다.');
-  const data = await api.get(`/xv3/api/device-group-mapping/${group_id}`);
+  const data = await api.get(`/xv3/api/device-group-mapping/${group_id}`, { groupId: group_id });
   return extractItems(data).map(m => ({
     id:          m.id,
     group_id:    m.groupId ?? group_id,
@@ -417,8 +424,7 @@ async function listTopologyMaps({ site_id } = {}) {
 async function getTopologyNodes({ map_id } = {}) {
   if (!map_id) throw new Error('map_id는 필수입니다.');
   // topology/xy는 siteId 기반 → 먼저 map→siteId 조회
-  const allMaps = await api.get('/xv3/api/topology');
-  const maps = Array.isArray(allMaps) ? allMaps : [];
+  const maps = await listTopologyMaps();
   const target = maps.find(m => m.id === map_id);
   if (!target) throw new Error(`map_id ${map_id}를 찾을 수 없습니다.`);
 
@@ -442,8 +448,7 @@ async function getTopologyLinks({ map_id, site_id } = {}) {
   let targetSiteId = site_id;
 
   if (targetSiteId == null && map_id != null) {
-    const allMaps = await api.get('/xv3/api/topology');
-    const maps = Array.isArray(allMaps) ? allMaps : [];
+    const maps = await listTopologyMaps();
     const target = maps.find(m => m.id === map_id);
     if (!target) throw new Error(`map_id ${map_id}를 찾을 수 없습니다.`);
     targetSiteId = target.siteId;

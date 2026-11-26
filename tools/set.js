@@ -125,7 +125,7 @@ async function addDeviceToGroup({ group_id, device_id } = {}) {
   if (!group_id) throw new Error('group_id는 필수입니다.');
   if (!device_id) throw new Error('device_id는 필수입니다.');
   const body = { groupId: group_id, deviceId: device_id };
-  const result = await api.post('/xv3/api/device-group-mapping', body);
+  const result = await api.post(`/xv3/api/device-group-mapping/${group_id}`, body);
   const mapping_id = result?.id ?? result;
   const d = await api.get(`/xv3/api/device/${device_id}`).catch(() => null);
   return { success: true, mapping_id, group_id, device_id, device_name: d?.name, device_ip: d?.ip };
@@ -136,12 +136,12 @@ async function removeDeviceFromGroup({ group_id, device_id } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
   // mapping row ID 조회 후 삭제
-  const mappings = await api.get(`/xv3/api/device-group-mapping/${group_id}`);
+  const mappings = await api.get(`/xv3/api/device-group-mapping/${group_id}`, { groupId: group_id });
   const arr = Array.isArray(mappings) ? mappings : (mappings?.content ?? []);
   const mapping = arr.find(m => m.deviceId === device_id || m.device_id === device_id);
   if (!mapping) throw new Error(`device_id ${device_id}는 group_id ${group_id}의 멤버가 아닙니다.`);
 
-  await api.del(`/xv3/api/device-group-mapping/${mapping.id}`);
+  await api.del(`/xv3/api/device-group-mapping/${mapping.id}`, {}, { body: { groupId: group_id, deviceId: device_id } });
   const d = await api.get(`/xv3/api/device/${device_id}`).catch(() => null);
   return { success: true, group_id, device_id, device_name: d?.name, device_ip: d?.ip };
 }
