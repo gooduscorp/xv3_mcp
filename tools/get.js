@@ -1,105 +1,104 @@
 'use strict';
-const { query } = require('../db');
-const { resolveIssueTables } = require('./issueHelper');
+const api = require('../api');
+const { extractItems } = api;
 
 // ──────────────────────────────────────────────
 // 장비(Device) 조회
 // ──────────────────────────────────────────────
 
 async function listDevices({ site_id, status, vendor, device_type_id, group_id, disabled, name, site_name, limit = 100 } = {}) {
-  let sql = `
-    SELECT
-      d.id, d.site_id, s.name AS site_name,
-      d.name, d.ip, d.vendor, d.model,
-      dt.name AS device_type,
-      d.status, d.disabled,
-      d.sys_location, d.sys_uptime,
-      d.ping_enabled, d.snmp_enabled, d.config_enabled,
-      d.description, d.create_date, d.modify_date
-    FROM device_info d
-    LEFT JOIN site_info s ON s.id = d.site_id
-    LEFT JOIN device_type dt ON dt.id = d.device_type_id
-    WHERE d.deleted = 0
-  `;
-  const params = [];
+  // GET /xv3/api/device-all-list: siteId, keyword 지원
+  // status/disabled 필드는 API 응답에 없어 JS-side 필터 불가 (향후 API 개선 필요)
+  const params = {};
+  if (site_id != null) params.siteId = site_id;
+  if (name)            params.keyword = name;
+  else if (site_name)  params.keyword = site_name;
 
-  if (site_id != null)        { sql += ' AND d.site_id = ?';       params.push(site_id); }
-  if (status != null)         { sql += ' AND d.status = ?';        params.push(status); }
-  if (vendor)                 { sql += ' AND d.vendor LIKE ?';     params.push(`%${vendor}%`); }
-  if (device_type_id != null) { sql += ' AND d.device_type_id = ?'; params.push(device_type_id); }
-  if (disabled != null)       { sql += ' AND d.disabled = ?';      params.push(disabled); }
-  if (name)                   { sql += ' AND d.name LIKE ?';       params.push(`%${name}%`); }
-  if (site_name)              { sql += ' AND s.name LIKE ?';       params.push(`%${site_name}%`); }
+  const data = await api.get('/xv3/api/device-all-list', params);
+  let arr = Array.isArray(data) ? data : [];
 
-  if (group_id != null) {
-    sql += ' AND d.id IN (SELECT device_id FROM device_group_mapping WHERE group_id = ?)';
-    params.push(group_id);
-  }
+  if (vendor)                 arr = arr.filter(d => d.vendor?.includes(vendor));
+  if (device_type_id != null) arr = arr.filter(d => d.deviceTypeId === device_type_id);
 
-  sql += ` ORDER BY d.site_id, d.name LIMIT ?`;
-  params.push(Number(limit));
-
-  return query(sql, params);
+  return arr.slice(0, Number(limit)).map(d => ({
+    id:             d.id,
+    site_id:        d.siteId,
+    site_name:      d.siteName,
+    name:           d.name,
+    ip:             d.ip,
+    vendor:         d.vendor,
+    model:          d.model,
+    device_type_id: d.deviceTypeId,
+    device_type:    d.deviceTypeName,
+  }));
 }
 
 async function getDevice({ id, ip } = {}) {
   if (!id && !ip) throw new Error('id 또는 ip 중 하나는 필수입니다.');
 
-  let sql = `
-    SELECT
-      d.id, d.site_id,
-      s.name AS site_name, s.site_code,
-      d.name, d.vendor, d.model, d.ip,
-      d.device_type_id,
-      dt.name AS device_type_name,
-      d.status, d.disabled,
-      d.sys_location, d.sys_uptime, d.sys_oid,
-      d.ping_enabled, d.snmp_enabled, d.config_enabled, d.port_collect_enabled,
-      d.ping_template_id, d.snmp_template_id,
-      snmp.name AS snmp_template_name, snmp.snmp_version,
-      ping.name AS ping_template_name,
-      d.service_type, d.service_layer,
-      d.telemetry_enable, d.dnac_device_id,
-      d.description,
-      d.create_date, d.modify_date
-    FROM device_info d
-    LEFT JOIN site_info s ON s.id = d.site_id
-    LEFT JOIN device_type dt ON dt.id = d.device_type_id
-    LEFT JOIN snmp_template snmp ON snmp.id = d.snmp_template_id
-    LEFT JOIN ping_template ping ON ping.id = d.ping_template_id
-    WHERE d.deleted = 0
-  `;
-  const params = [];
+  if (id) {
+    const d = await api.get(`/xv3/api/device/${id}`);
+    return d ? normalizeDevice(d) : null;
+  }
 
-  if (id)  { sql += ' AND d.id = ?'; params.push(id); }
-  else     { sql += ' AND d.ip = ?'; params.push(ip); }
+  // IP 검색: device-all-list keyword 활용 후 정확히 일치하는 항목 선택
+  const list = await api.get('/xv3/api/device-all-list', { keyword: ip });
+  const arr  = Array.isArray(list) ? list : [];
+  const found = arr.find(d => d.ip === ip);
+  if (!found) return null;
+  const d = await api.get(`/xv3/api/device/${found.id}`);
+  return d ? normalizeDevice(d) : null;
+}
 
-  const rows = await query(sql, params);
-  return rows[0] ?? null;
+function normalizeDevice(d) {
+  return {
+    id:                   d.id,
+    site_id:              d.siteId,
+    site_name:            d.siteName,
+    name:                 d.name,
+    vendor:               d.vendor,
+    model:                d.model,
+    ip:                   d.ip,
+    device_type_id:       d.deviceTypeId,
+    device_type_name:     d.deviceTypeName,
+    disabled:             d.disabled,
+    sys_location:         d.sysLocation,
+    ping_enabled:         d.pingEnabled,
+    snmp_enabled:         d.snmpEnabled,
+    config_enabled:       d.configEnabled,
+    port_collect_enabled: d.portCollectEnabled,
+    ping_template_id:     d.pingTemplateId,
+    snmp_template_id:     d.snmpTemplateId,
+    description:          d.description,
+    telemetry_enable:     d.telemetryEnable,
+    create_date:          d.createDate,
+    modify_date:          d.modifyDate,
+  };
 }
 
 async function getDeviceInterfaces({ device_id, admin_status, oper_status } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
-  let sql = `
-    SELECT
-      ci.id, ci.device_id, ci.interface_id,
-      ci.name, ci.description, ci.alias,
-      ci.speed, ci.admin_mac,
-      ci.admin_status, ci.oper_status,
-      ci.duplex, ci.stp_status,
-      ci.last_octet_value, ci.last_used_date,
-      ci.create_date, ci.modify_date
-    FROM collect_interface ci
-    WHERE ci.device_id = ?
-  `;
-  const params = [device_id];
+  const data = await api.get('/xv3/api/device-interface', { deviceId: device_id });
+  let arr = Array.isArray(data) ? data : [];
 
-  if (admin_status != null) { sql += ' AND ci.admin_status = ?'; params.push(admin_status); }
-  if (oper_status  != null) { sql += ' AND ci.oper_status = ?';  params.push(oper_status); }
+  if (admin_status != null) arr = arr.filter(i => i.adminStatus === admin_status);
+  if (oper_status != null)  arr = arr.filter(i => i.operStatus === oper_status);
 
-  sql += ' ORDER BY ci.interface_id';
-  return query(sql, params);
+  return arr.map(i => ({
+    id:             i.id,
+    device_id,
+    interface_id:   i.interfaceId,
+    name:           i.name,
+    description:    i.description,
+    alias:          i.alias,
+    admin_status:   i.adminStatus,
+    oper_status:    i.operStatus,
+    speed:          i.speed,
+    duplex:         i.duplex,
+    stp_status:     i.stpStatus,
+    last_used_date: i.lastUsedDate,
+  }));
 }
 
 async function listDeviceInterfaceSummary({
@@ -115,126 +114,134 @@ async function listDeviceInterfaceSummary({
   oper_status,
   limit = 100,
 } = {}) {
-  let sql = `
-    SELECT
-      d.id AS device_id,
-      d.site_id,
-      s.name AS site_name,
-      d.name AS device_name,
-      d.ip AS device_ip,
-      d.vendor,
-      d.model,
-      dt.name AS device_type,
-      d.status AS device_status,
-      d.disabled,
-      COUNT(ci.id) AS interface_total,
-      CAST(SUM(CASE WHEN ci.admin_status = 1 THEN 1 ELSE 0 END) AS UNSIGNED) AS admin_up,
-      CAST(SUM(CASE WHEN ci.admin_status = 2 THEN 1 ELSE 0 END) AS UNSIGNED) AS admin_down,
-      CAST(SUM(CASE WHEN ci.oper_status = 1 THEN 1 ELSE 0 END) AS UNSIGNED) AS oper_up,
-      CAST(SUM(CASE WHEN ci.oper_status = 2 THEN 1 ELSE 0 END) AS UNSIGNED) AS oper_down,
-      CAST(SUM(CASE WHEN ci.description IS NOT NULL AND ci.description <> '' THEN 1 ELSE 0 END) AS UNSIGNED) AS description_count,
-      CAST(SUM(CASE WHEN ci.alias IS NOT NULL AND ci.alias <> '' THEN 1 ELSE 0 END) AS UNSIGNED) AS alias_count,
-      MAX(ci.modify_date) AS interface_last_modified
-    FROM device_info d
-    LEFT JOIN site_info s ON s.id = d.site_id
-    LEFT JOIN device_type dt ON dt.id = d.device_type_id
-    LEFT JOIN collect_interface ci ON ci.device_id = d.id
-    WHERE d.deleted = 0
-  `;
-  const params = [];
+  const devices = await listDevices({
+    site_id,
+    site_name,
+    name,
+    status,
+    vendor,
+    device_type_id,
+    group_id,
+    disabled,
+    limit,
+  });
 
-  if (site_id != null)        { sql += ' AND d.site_id = ?';       params.push(site_id); }
-  if (site_name)              { sql += ' AND s.name LIKE ?';       params.push(`%${site_name}%`); }
-  if (name)                   { sql += ' AND d.name LIKE ?';       params.push(`%${name}%`); }
-  if (status != null)         { sql += ' AND d.status = ?';        params.push(status); }
-  if (vendor)                 { sql += ' AND d.vendor LIKE ?';     params.push(`%${vendor}%`); }
-  if (device_type_id != null) { sql += ' AND d.device_type_id = ?'; params.push(device_type_id); }
-  if (disabled != null)       { sql += ' AND d.disabled = ?';      params.push(disabled); }
-  if (admin_status != null)   { sql += ' AND ci.admin_status = ?'; params.push(admin_status); }
-  if (oper_status != null)    { sql += ' AND ci.oper_status = ?';  params.push(oper_status); }
+  const BATCH_SIZE = 10;
+  const summaries = [];
 
-  if (group_id != null) {
-    sql += ' AND d.id IN (SELECT device_id FROM device_group_mapping WHERE group_id = ?)';
-    params.push(group_id);
+  for (let i = 0; i < devices.length; i += BATCH_SIZE) {
+    const batch = devices.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (d) => {
+        const ifaces = await getDeviceInterfaces({
+          device_id: d.id,
+          admin_status,
+          oper_status,
+        });
+
+        let adminUp = 0;
+        let adminDown = 0;
+        let operUp = 0;
+        let operDown = 0;
+        let descCount = 0;
+        let aliasCount = 0;
+        let lastModified = null;
+
+        for (const iface of ifaces) {
+          if (iface.admin_status === 1) adminUp++;
+          else if (iface.admin_status === 2) adminDown++;
+
+          if (iface.oper_status === 1) operUp++;
+          else if (iface.oper_status === 2) operDown++;
+
+          if (iface.description) descCount++;
+          if (iface.alias) aliasCount++;
+          if (iface.last_used_date && (!lastModified || iface.last_used_date > lastModified)) {
+            lastModified = iface.last_used_date;
+          }
+        }
+
+        return {
+          device_id:               d.id,
+          site_id:                 d.site_id,
+          site_name:               d.site_name,
+          device_name:             d.name,
+          device_ip:               d.ip,
+          vendor:                  d.vendor,
+          model:                   d.model,
+          device_type:             d.device_type,
+          interface_total:         ifaces.length,
+          admin_up:                adminUp,
+          admin_down:              adminDown,
+          oper_up:                 operUp,
+          oper_down:               operDown,
+          description_count:       descCount,
+          alias_count:             aliasCount,
+          interface_last_modified: lastModified,
+        };
+      })
+    );
+    summaries.push(...batchResults);
   }
 
-  sql += `
-    GROUP BY d.id, d.site_id, s.name, d.name, d.ip, d.vendor, d.model,
-             dt.name, d.status, d.disabled
-    ORDER BY d.site_id, d.name
-    LIMIT ?
-  `;
-  params.push(Number(limit));
-
-  return query(sql, params);
+  return summaries;
 }
 
 async function getDeviceIpAddresses({ device_id } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
-
-  return query(`
-    SELECT
-      ip.id, ip.device_id, ip.interface_id,
-      ip.interface_ip, ip.network_ip, ip.network_mask,
-      ci.name AS interface_name,
-      ip.create_date, ip.modify_date
-    FROM collect_interface_ip ip
-    LEFT JOIN collect_interface ci
-      ON ci.device_id = ip.device_id AND ci.interface_id = ip.interface_id
-    WHERE ip.device_id = ?
-    ORDER BY ip.interface_id
-  `, [device_id]);
+  const data = await api.get(`/xv3/api/interface-ip/${device_id}`, { parentId: device_id });
+  return extractItems(data).map(ip => ({
+    id:             ip.id,
+    device_id:      ip.deviceId ?? device_id,
+    interface_id:   ip.interfaceId,
+    interface_ip:   ip.interfaceIp,
+    network_ip:     ip.networkIp,
+    network_mask:   ip.networkMask,
+    interface_name: ip.interfaceName,
+    create_date:    ip.createDate,
+    modify_date:    ip.modifyDate,
+  }));
 }
 
 async function getDeviceCamTable({ device_id, interface_id, mac, ip, limit = 200 } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
 
-  let sql = `
-    SELECT
-      cam.device_id, cam.interface_id,
-      ci.name AS interface_name,
-      cam.mac, cam.ip, cam.vlan,
-      cam.create_date, cam.modify_date, cam.delete_date
-    FROM collect_interface_cam cam
-    LEFT JOIN collect_interface ci
-      ON ci.device_id = cam.device_id AND ci.interface_id = cam.interface_id
-    WHERE cam.device_id = ? AND cam.delete_date IS NULL
-  `;
-  const params = [device_id];
+  const params = { deviceId: device_id, size: limit };
+  if (interface_id != null) params.interfaceId = interface_id;
+  if (mac)                  params.mac = mac;
+  if (ip)                   params.ip = ip;
 
-  if (interface_id != null) { sql += ' AND cam.interface_id = ?'; params.push(interface_id); }
-  if (mac)                  { sql += ' AND cam.mac LIKE ?';       params.push(`%${mac}%`); }
-  if (ip)                   { sql += ' AND cam.ip LIKE ?';        params.push(`%${ip}%`); }
-
-  sql += ' ORDER BY cam.interface_id, cam.ip LIMIT ?';
-  params.push(Number(limit));
-  return query(sql, params);
+  const data = await api.get('/xv3/api/interface-arp', params);
+  return extractItems(data).map(r => ({
+    device_id,
+    interface_id:   r.interfaceId,
+    interface_name: r.interfaceName,
+    mac:            r.mac,
+    ip:             r.ip,
+    vlan:           r.vlan,
+    create_date:    r.createDate,
+    modify_date:    r.modifyDate,
+  }));
 }
 
 // IP로 장비 또는 인터페이스 검색
 async function searchByIp({ ip } = {}) {
   if (!ip) throw new Error('ip는 필수입니다.');
 
-  const [devices, interfaces] = await Promise.all([
-    query(`
-      SELECT id, site_id, name, ip, vendor, model, status, disabled
-      FROM device_info
-      WHERE ip LIKE ? AND deleted = 0
-      LIMIT 20
-    `, [`%${ip}%`]),
-    query(`
-      SELECT
-        iip.device_id, d.name AS device_name, d.ip AS device_ip,
-        iip.interface_ip, iip.network_ip, iip.network_mask,
-        ci.name AS interface_name
-      FROM collect_interface_ip iip
-      JOIN device_info d ON d.id = iip.device_id
-      LEFT JOIN collect_interface ci
-        ON ci.device_id = iip.device_id AND ci.interface_id = iip.interface_id
-      WHERE iip.interface_ip LIKE ? AND d.deleted = 0
-      LIMIT 20
-    `, [`%${ip}%`]),
+  const [deviceRes, ifaceRes] = await Promise.allSettled([
+    api.get('/xv3/api/device-all-list', { keyword: ip }),
+    api.get('/xv3/api/interface-arp', { ip, size: 20 }),
   ]);
+
+  if (deviceRes.status === 'rejected' && ifaceRes.status === 'rejected') {
+    throw deviceRes.reason;
+  }
+
+  const deviceData = deviceRes.status === 'fulfilled' ? deviceRes.value : [];
+  const ifaceData  = ifaceRes.status === 'fulfilled' ? ifaceRes.value : null;
+
+  const devices    = (Array.isArray(deviceData) ? deviceData : []).filter(d => d.ip?.includes(ip));
+  const interfaces = extractItems(ifaceData);
 
   return { devices, interfaces };
 }
@@ -244,129 +251,72 @@ async function searchByIp({ ip } = {}) {
 // ──────────────────────────────────────────────
 
 async function listAlarms({ device_ip, device_name, start_date, end_date, limit = 100 } = {}) {
-  let sql = `
-    SELECT alarm_type_id, device_name, device_ip, message,
-           receiver, sender, single, create_date, comment
-    FROM alarm_history
-    WHERE 1=1
-  `;
-  const params = [];
+  const params = { size: limit };
+  if (start_date) params.createDate = start_date;
 
-  if (device_ip)   { sql += ' AND device_ip LIKE ?';   params.push(`%${device_ip}%`); }
-  if (device_name) { sql += ' AND device_name LIKE ?'; params.push(`%${device_name}%`); }
-  if (start_date)  { sql += ' AND create_date >= ?';   params.push(start_date); }
-  if (end_date)    { sql += ' AND create_date <= ?';   params.push(end_date); }
+  const data = await api.get('/xv3/api/sms-log', params);
+  let arr = extractItems(data);
 
-  sql += ' ORDER BY create_date DESC LIMIT ?';
-  params.push(Number(limit));
+  // API 미지원 필터: JS-side 처리
+  if (device_ip)   arr = arr.filter(r => r.deviceIp?.includes(device_ip) || r.message?.includes(device_ip));
+  if (device_name) arr = arr.filter(r => r.deviceName?.includes(device_name) || r.message?.includes(device_name));
+  if (end_date)    arr = arr.filter(r => !r.createDate || r.createDate <= end_date);
 
-  return query(sql, params);
+  return arr.slice(0, Number(limit));
 }
 
 async function listIssues({ device_id, severity, issue_type, start_date, end_date, active_only, limit = 100 } = {}) {
-  const { monthly, usePersist, persistBefore } = await resolveIssueTables({ start_date, end_date, active_only });
+  const params = { size: limit };
+  if (device_id)  params.deviceIdList = device_id;
+  if (severity)   params.severityList = severity;
+  if (issue_type) params.issueTypeList = issue_type;
+  if (start_date) params.startTime = start_date;
+  if (end_date)   params.endTime = end_date;
 
-  const targets = [
-    ...monthly.map(t => ({ table: t, persistBefore: null })),
-    ...(usePersist ? [{ table: 'issue_log_persist', persistBefore }] : []),
-  ];
+  const data = await api.get('/xv3/api/issue-history', params);
+  let arr = extractItems(data);
 
-  if (targets.length === 0) return [];
+  if (active_only) arr = arr.filter(r => !r.endDate && !r.endTime);
 
-  const lim = Number(limit);
-
-  const ISSUE_SELECT = `
-    il.id, il.device_id,
-    d.name AS device_name, d.ip AS device_ip,
-    il.issue_type,
-    it.issue_name AS issue_type_name,
-    il.severity,
-    ise.severity AS severity_name,
-    il.interface_name, il.instance_name,
-    il.message, il.count,
-    il.create_date, il.modify_date, il.end_date,
-    il.is_display
-  `;
-  const ISSUE_JOINS = `
-    LEFT JOIN xv3.device_info d      ON d.id          = il.device_id
-    LEFT JOIN xv3.issue_type it      ON it.issue_code  = il.issue_type
-    LEFT JOIN xv3.issue_severity ise ON ise.id         = il.severity
-  `;
-
-  const buildWhere = (pb) => {
-    const conds = ['1=1'];
-    const params = [];
-    if (device_id != null) { conds.push('il.device_id = ?');    params.push(device_id); }
-    if (severity != null)  { conds.push('il.severity = ?');     params.push(severity); }
-    if (issue_type)        { conds.push('il.issue_type = ?');   params.push(issue_type); }
-    if (start_date)        { conds.push('il.create_date >= ?'); params.push(start_date); }
-    if (end_date)          { conds.push('il.create_date <= ?'); params.push(end_date); }
-    if (active_only)       { conds.push('il.end_date IS NULL'); }
-    if (pb)                { conds.push('il.create_date < ?');  params.push(pb); }
-    return { where: conds.join(' AND '), params };
-  };
-
-  if (targets.length === 1) {
-    const { table, persistBefore: pb } = targets[0];
-    const { where, params } = buildWhere(pb);
-    return query(
-      `SELECT ${ISSUE_SELECT} FROM xv3_issue.${table} il ${ISSUE_JOINS} WHERE ${where} ORDER BY il.modify_date DESC LIMIT ?`,
-      [...params, lim]
-    );
-  }
-
-  const allParams = [];
-  const subqueries = targets.map(({ table, persistBefore: pb }) => {
-    const { where, params } = buildWhere(pb);
-    allParams.push(...params, lim);
-    return `(SELECT ${ISSUE_SELECT} FROM xv3_issue.${table} il ${ISSUE_JOINS} WHERE ${where} ORDER BY il.modify_date DESC LIMIT ?)`;
-  });
-  allParams.push(lim);
-
-  return query(
-    `SELECT * FROM (${subqueries.join(' UNION ALL ')}) _combined ORDER BY modify_date DESC LIMIT ?`,
-    allParams
-  );
+  return arr.map(r => ({
+    id:              r.id,
+    device_id:       r.deviceId,
+    device_name:     r.deviceName,
+    device_ip:       r.deviceIp,
+    issue_type:      r.issueType,
+    issue_type_name: r.issueTypeName,
+    severity:        r.severity,
+    severity_name:   r.severityName,
+    interface_name:  r.interfaceName,
+    instance_name:   r.instanceName,
+    message:         r.message,
+    count:           r.count,
+    create_date:     r.createDate,
+    modify_date:     r.modifyDate,
+    end_date:        r.endDate,
+    is_display:      r.isDisplay,
+  }));
 }
 
+
 async function getIssueSummary({ device_id, site_id } = {}) {
-  const params = [];
-  // 활성 이슈 집계는 issue_log_persist (단일 출처) 사용 → JOIN으로 site_id 필터 최적화
-  let onClause = 'il.severity = ise.id AND il.end_date IS NULL';
-  let deviceJoin = '';
+  // dashboard/issue-status-today: deviceIdList, siteId 필터 지원
+  const params = {};
+  if (device_id != null) params.deviceIdList = device_id;
+  if (site_id != null)   params.siteId = site_id;
 
-  if (device_id != null) {
-    onClause += ' AND il.device_id = ?';
-    params.push(device_id);
-  }
-  if (site_id != null) {
-    deviceJoin = 'JOIN xv3.device_info d ON d.id = il.device_id AND d.site_id = ?';
-    params.push(site_id);
-  }
-
-  const sql = `
-    SELECT
-      ise.id AS severity_id,
-      ise.severity AS severity_name,
-      COUNT(il.id) AS count
-    FROM xv3.issue_severity ise
-    LEFT JOIN xv3_issue.issue_log_persist il ON ${onClause}
-    ${deviceJoin}
-    GROUP BY ise.id, ise.severity
-    ORDER BY ise.id
-  `;
-
-  const rows = await query(sql, params);
-  const total = rows.reduce((sum, r) => sum + Number(r.count), 0);
-  return { total_active: total, by_severity: rows };
+  const data = await api.get('/xv3/api/dashboard/issue-status-today', params);
+  const arr = Array.isArray(data) ? data : (data ? [data] : []);
+  const total = arr.reduce((s, r) => s + (Number(r.count) || 0), 0);
+  return { total_active: total, by_severity: arr };
 }
 
 async function listIssueTypes() {
-  return query('SELECT issue_code, issue_name, disabled FROM issue_type ORDER BY issue_code');
+  return api.get('/xv3/api/issue-type-list');
 }
 
 async function listIssueSeverities() {
-  return query('SELECT id, severity, dnac_priority, disabled FROM issue_severity ORDER BY id');
+  return api.get('/xv3/api/issue-severity-list');
 }
 
 // ──────────────────────────────────────────────
@@ -374,64 +324,84 @@ async function listIssueSeverities() {
 // ──────────────────────────────────────────────
 
 async function listSites() {
-  return query(`
-    SELECT id, site_code, name, country_code, time_zone, description, disabled
-    FROM site_info
-    ORDER BY id
-  `);
+  return api.get('/xv3/api/sites', { disabled: false });
 }
-// 
+
 async function listDeviceGroups({ site_id, name } = {}) {
-  let sql = `
-    SELECT g.id, g.site_id, s.name AS site_name,
-           g.name, g.description, g.disabled,
-           COUNT(m.device_id) AS device_count
-    FROM device_group g
-    LEFT JOIN site_info s ON s.id = g.site_id
-    LEFT JOIN device_group_mapping m ON m.group_id = g.id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (site_id != null) { sql += ' AND g.site_id = ?'; params.push(site_id); }
-  if (name)            { sql += ' AND g.name LIKE ?';  params.push(`%${name}%`); }
-  sql += ' GROUP BY g.id ORDER BY g.site_id, g.name';
-  return query(sql, params);
+  // /xv3/api/device-group/{siteId} 형태만 지원 → site_id 없으면 전체 사이트 순회
+  let groups = [];
+  if (site_id != null) {
+    groups = extractItems(await api.get(`/xv3/api/device-group/${site_id}`));
+  } else {
+    const sites = await api.get('/xv3/api/sites');
+    const siteArr = extractItems(sites);
+    const results = await Promise.all(
+      siteArr.map(s => api.get(`/xv3/api/device-group/${s.id}`).then(d => extractItems(d)).catch(() => []))
+    );
+    groups = results.flat();
+  }
+  if (name) groups = groups.filter(g => g.name?.includes(name));
+
+  return groups.map(g => ({
+    id:           g.id,
+    site_id:      g.siteId,
+    site_name:    g.siteName,
+    name:         g.name,
+    description:  g.description,
+    disabled:     g.disabled,
+    device_count: g.deviceCount,
+  }));
 }
 
 async function getDeviceGroupMembers({ group_id } = {}) {
   if (!group_id) throw new Error('group_id는 필수입니다.');
-  return query(`
-    SELECT m.id, m.group_id, m.device_id,
-           d.name AS device_name, d.ip AS device_ip,
-           d.vendor, d.model, d.status, d.disabled
-    FROM device_group_mapping m
-    JOIN device_info d ON d.id = m.device_id
-    WHERE m.group_id = ? AND d.deleted = 0
-    ORDER BY d.name
-  `, [group_id]);
+  const data = await api.get(`/xv3/api/device-group-mapping/${group_id}`, { groupId: group_id });
+  return extractItems(data).map(m => ({
+    id:          m.id,
+    group_id:    m.groupId ?? group_id,
+    device_id:   m.deviceId,
+    device_name: m.deviceName,
+    device_ip:   m.deviceIp,
+    vendor:      m.vendor,
+    model:       m.model,
+    disabled:    m.disabled,
+  }));
 }
 
 async function listUsers({ site_id, role_type, group_id, limit = 100 } = {}) {
-  let sql = `
-    SELECT
-      u.id, u.site_id, s.name AS site_name,
-      u.user_id, u.name, u.role_type, u.is_master,
-      ug.name AS group_name,
-      u.dept_name, u.position_name,
-      u.phone, u.mobile, u.email,
-      u.notification, u.create_date, u.modify_date
-    FROM user_info u
-    LEFT JOIN site_info s ON s.id = u.site_id
-    LEFT JOIN user_group ug ON ug.id = u.group_id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (site_id)   { sql += ' AND u.site_id = ?';  params.push(site_id); }
-  if (role_type) { sql += ' AND u.role_type = ?'; params.push(role_type); }
-  if (group_id)  { sql += ' AND u.group_id = ?'; params.push(group_id); }
-  sql += ' ORDER BY u.site_id, u.name LIMIT ?';
-  params.push(Number(limit));
-  return query(sql, params);
+  // /xv3/api/users/{siteId} 형태만 지원 → site_id 없으면 전체 사이트 순회
+  let arr = [];
+  if (site_id != null) {
+    arr = extractItems(await api.get(`/xv3/api/users/${site_id}`));
+  } else {
+    const sites = await api.get('/xv3/api/sites');
+    const siteArr = extractItems(sites);
+    const results = await Promise.all(
+      siteArr.map(s => api.get(`/xv3/api/users/${s.id}`).then(d => extractItems(d)).catch(() => []))
+    );
+    arr = results.flat();
+  }
+  if (role_type)  arr = arr.filter(u => u.roleType === role_type);
+  if (group_id)   arr = arr.filter(u => u.groupId === group_id);
+
+  return arr.map(u => ({
+    id:            u.id,
+    site_id:       u.siteId,
+    site_name:     u.siteName,
+    user_id:       u.userId,
+    name:          u.name,
+    role_type:     u.roleType,
+    is_master:     u.isMaster,
+    group_name:    u.groupName,
+    dept_name:     u.deptName,
+    position_name: u.positionName,
+    phone:         u.phone,
+    mobile:        u.mobile,
+    email:         u.email,
+    notification:  u.notification,
+    create_date:   u.createDate,
+    modify_date:   u.modifyDate,
+  }));
 }
 
 // ──────────────────────────────────────────────
@@ -439,58 +409,63 @@ async function listUsers({ site_id, role_type, group_id, limit = 100 } = {}) {
 // ──────────────────────────────────────────────
 
 async function listTopologyMaps({ site_id } = {}) {
-  let sql = `
-    SELECT id, site_id, name, topo_type, disabled,
-           background_enabled, create_date, modify_date
-    FROM topology_map WHERE 1=1
-  `;
-  const params = [];
-  if (site_id != null) { sql += ' AND site_id = ?'; params.push(site_id); }
-  sql += ' ORDER BY site_id, name';
-  return query(sql, params);
+  const params = {};
+  if (site_id != null) params.siteId = site_id;
+  try {
+    const data = await api.get('/xv3/api/topology', params);
+    return Array.isArray(data) ? data : (data ? [data] : []);
+  } catch (e) {
+    // 토폴로지 미설정 시 서버 NPE 발생 가능 → 빈 배열 반환
+    if (e.message?.includes('500') || e.message?.includes('NullPointerException')) return [];
+    throw e;
+  }
 }
 
 async function getTopologyNodes({ map_id } = {}) {
   if (!map_id) throw new Error('map_id는 필수입니다.');
-  return query(`
-    SELECT
-      n.id, n.map_id, n.device_id,
-      d.name AS device_name, d.ip AS device_ip,
-      d.vendor, d.model, d.status,
-      n.icon_type, n.x, n.y, n.disabled
-    FROM topology_nodes n
-    LEFT JOIN device_info d ON d.id = n.device_id
-    WHERE n.map_id = ?
-    ORDER BY n.id
-  `, [map_id]);
+  // topology/xy는 siteId 기반 → 먼저 map→siteId 조회
+  const maps = await listTopologyMaps();
+  const target = maps.find(m => m.id === map_id);
+  if (!target) throw new Error(`map_id ${map_id}를 찾을 수 없습니다.`);
+
+  const data = await api.get('/xv3/api/topology/xy', { siteId: target.siteId });
+  const nodes = data?.topologyData?.nodes ?? [];
+  return nodes.map(n => ({
+    id:          n.node_id ?? n.id,
+    map_id:      n.map_id ?? map_id,
+    device_id:   n.id,
+    device_name: n.name,
+    device_ip:   n.ip,
+    icon_type:   n.icon_type,
+    x:           n.x,
+    y:           n.y,
+    description: n.description,
+    site_id:     n.site_id,
+  }));
 }
 
 async function getTopologyLinks({ map_id, site_id } = {}) {
-  let sql = `
-    SELECT
-      l.id, l.site_id, l.source, l.target,
-      d_s.name AS source_name, d_s.ip AS source_ip,
-      d_t.name AS target_name, d_t.ip AS target_ip,
-      l.color, l.thickness, l.is_visible, l.is_custom
-    FROM topology_links l
-    LEFT JOIN device_info d_s ON d_s.id = l.source
-    LEFT JOIN device_info d_t ON d_t.id = l.target
-  `;
-  const params = [];
+  let targetSiteId = site_id;
 
-  if (map_id != null) {
-    sql += `
-      JOIN topology_nodes tn_s ON tn_s.device_id = l.source AND tn_s.map_id = ?
-      JOIN topology_nodes tn_t ON tn_t.device_id = l.target AND tn_t.map_id = ?
-    `;
-    params.push(map_id, map_id);
+  if (targetSiteId == null && map_id != null) {
+    const maps = await listTopologyMaps();
+    const target = maps.find(m => m.id === map_id);
+    if (!target) throw new Error(`map_id ${map_id}를 찾을 수 없습니다.`);
+    targetSiteId = target.siteId;
   }
 
-  sql += ' WHERE 1=1';
-  if (site_id != null) { sql += ' AND l.site_id = ?'; params.push(site_id); }
-  sql += ' ORDER BY l.id';
-
-  return query(sql, params);
+  const params = {};
+  if (targetSiteId != null) params.siteId = targetSiteId;
+  const data = await api.get('/xv3/api/topology/xy', params);
+  const links = data?.topologyData?.links ?? [];
+  return links.map(l => ({
+    id:        l.id,
+    site_id:   l.site_id,
+    source:    l.source,
+    target:    l.target,
+    thickness: l.thickness,
+    color:     l.color,
+  }));
 }
 
 // ──────────────────────────────────────────────
@@ -498,87 +473,59 @@ async function getTopologyLinks({ map_id, site_id } = {}) {
 // ──────────────────────────────────────────────
 
 async function listCollectors() {
-  return query(`
-    SELECT id, name, ip, server_type, status, description, disabled,
-           last_update_date, create_date
-    FROM collector_info
-    ORDER BY id
-  `);
+  return api.get('/xv3/api/collector-all');
 }
 
 async function getDeviceConfig({ device_id } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
-  return query(`
-    SELECT id, device_id, protocol, insert_date,
-           SUBSTRING(config_data, 1, 5000) AS config_data_preview
-    FROM config_data
-    WHERE device_id = ?
-    ORDER BY insert_date DESC
-    LIMIT 5
-  `, [device_id]);
+  return api.get(`/xv3/api/config-data/${device_id}`);
 }
 
 async function getConfigHistory({ device_id, limit = 20 } = {}) {
   if (!device_id) throw new Error('device_id는 필수입니다.');
-  return query(`
-    SELECT setup_id, device_id, insert_date, is_success,
-           fail_reason, chg_identity, user_id, is_full
-    FROM config_history
-    WHERE device_id = ?
-    ORDER BY insert_date DESC
-    LIMIT ?
-  `, [device_id, Number(limit)]);
+  const data = await api.get('/xv3/api/config-backup-history', { deviceId: device_id, size: limit });
+  return extractItems(data);
 }
 
 async function listDeviceTypes() {
-  return query(`
-    SELECT id, name, icon_type, sort_seq, disabled
-    FROM device_type WHERE disabled = 0 ORDER BY sort_seq
-  `);
+  return api.get('/xv3/api/device-type');
 }
 
 async function getDeviceStatusSummary({ site_id } = {}) {
-  let sql = `
-    SELECT
-      s.name AS site_name,
-      COUNT(*) AS total,
-      SUM(CASE WHEN d.status = 1 THEN 1 ELSE 0 END) AS up,
-      SUM(CASE WHEN d.status = 0 THEN 1 ELSE 0 END) AS down,
-      SUM(CASE WHEN d.disabled = 1 THEN 1 ELSE 0 END) AS disabled,
-      SUM(CASE WHEN d.ping_enabled = 1 THEN 1 ELSE 0 END) AS ping_enabled,
-      SUM(CASE WHEN d.snmp_enabled = 1 THEN 1 ELSE 0 END) AS snmp_enabled
-    FROM device_info d
-    LEFT JOIN site_info s ON s.id = d.site_id
-    WHERE d.deleted = 0
-  `;
-  const params = [];
-  if (site_id != null) { sql += ' AND d.site_id = ?'; params.push(site_id); }
-  sql += ' GROUP BY d.site_id, s.name ORDER BY s.name';
-  return query(sql, params);
+  const params = {};
+  if (site_id != null) params.siteIdList = site_id;
+  const data = await api.get('/xv3/api/dashboard/status-panel', params);
+  return (Array.isArray(data) ? data : []).map(s => ({
+    site_id:         s.siteId,
+    site_name:       s.name,
+    total:           s.devCnt,
+    up:              s.ohtCnt,
+    critical_issues: s.criCnt,
+    pending_issues:  s.penbCnt,
+    disabled:        s.pdisCnt,
+  }));
 }
 
 async function listSnmpTemplates({ site_id } = {}) {
-  let sql = `
-    SELECT id, site_id, name, snmp_version,
-           security_level, user_name, auth_protocol, timeout, description
-    FROM snmp_template WHERE 1=1
-  `;
-  const params = [];
-  if (site_id != null) { sql += ' AND site_id = ?'; params.push(site_id); }
-  sql += ' ORDER BY site_id, name';
-  return query(sql, params);
+  const data = await api.get('/xv3/api/snmp-template', { size: 1000 });
+  let arr = extractItems(data);
+  if (site_id != null) arr = arr.filter(t => t.siteId === site_id);
+  return arr.map(t => ({
+    id:             t.id,
+    site_id:        t.siteId,
+    name:           t.name,
+    snmp_version:   t.snmpVersion,
+    security_level: t.securityLevel,
+    user_name:      t.userName,
+    auth_protocol:  t.authProtocol,
+    timeout:        t.timeout,
+    description:    t.description,
+  }));
 }
 
 async function getSystemSettings({ site_id } = {}) {
-  let sql = `
-    SELECT site_id, group_code, base_code, name, name_eng,
-           value1, value2, value3, value4, value5
-    FROM system_setting WHERE 1=1
-  `;
-  const params = [];
-  if (site_id != null) { sql += ' AND site_id = ?'; params.push(site_id); }
-  sql += ' ORDER BY site_id, group_code, base_code';
-  return query(sql, params);
+  if (site_id == null) throw new Error('site_id는 필수입니다.');
+  return api.get(`/xv3/api/system-setting/${site_id}`);
 }
 
 module.exports = {

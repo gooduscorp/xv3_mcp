@@ -11,6 +11,7 @@ const get   = require('./tools/get');
 const set   = require('./tools/set');
 const perf  = require('./tools/perf');
 const issue = require('./tools/issue');
+const { maskSecret } = require('./api');
 
 // ────────────────────────────────────────────────────────
 // 헬퍼: 결과를 MCP 텍스트 응답으로 변환
@@ -695,7 +696,10 @@ async function startHttp(port) {
     if (!API_KEY) return next(); // 키 미설정 시 인증 비활성화
     const auth = req.headers['authorization'] ?? '';
     if (auth === `Bearer ${API_KEY}`) return next();
-    httpLog(`인증 실패 | from=${req.socket?.remoteAddress ?? req.ip ?? '-'} | auth=${auth || '(없음)'}`);
+    const maskedAuth = auth
+      ? (auth.startsWith('Bearer ') ? `Bearer ${maskSecret(auth.slice(7))}` : maskSecret(auth))
+      : '(없음)';
+    httpLog(`인증 실패 | from=${req.socket?.remoteAddress ?? req.ip ?? '-'} | auth=${maskedAuth}`);
     res.status(401).json({ error: 'Unauthorized: MCP_API_KEY가 일치하지 않습니다.' });
   });
 
